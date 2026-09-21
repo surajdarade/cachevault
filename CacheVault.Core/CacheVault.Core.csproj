@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Folder Include="DataStructures\Lists\" />
+    <Folder Include="Expiration\" />
+    <Folder Include="Concurrency\" />
+    <Folder Include="Eviction\" />
+    <Folder Include="PubSub\" />
+    <Folder Include="Transactions\" />
+  </ItemGroup>
+
+</Project>

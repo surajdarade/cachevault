@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/benchmarks/" />
+  <Folder Name="/src/">
+    <Project Path="CacheVault.Core/CacheVault.Core.csproj" Id="b7f0adc5-bc6c-4c4c-b039-767569265cca" />
+    <Project Path="CacheVault.Infrastructure/CacheVault.Infrastructure.csproj" Id="cdb0c653-a342-42d8-b84c-3225accbc1f8" />
+    <Project Path="CacheVault.Persistence/CacheVault.Persistence.csproj" Id="0c15a83b-3b22-4d57-a8da-92115c9c8ec2" />
+    <Project Path="CacheVault.Protocol/CacheVault.Protocol.csproj" Id="d3a64e8b-43cc-4e8e-b31f-03100f71b2d3" />
+    <Project Path="CacheVault.Replication/CacheVault.Replication.csproj" Id="2bc71f13-e134-4afa-8946-1f203cf6fae2" />
+    <Project Path="CacheVault.Server/CacheVault.Server.csproj" Id="474d1f9f-ae95-4ef9-8642-d716373d7b1c" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="CacheVault.UnitTests/CacheVault.UnitTests.csproj" Id="67215ac2-36b1-435e-bddf-2b15d15f80d0" />
+  </Folder>
+</Solution>

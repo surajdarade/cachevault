@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CacheVault.Core\CacheVault.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Abstractions\" />
+    <Folder Include="Aof\Reading\" />
+    <Folder Include="Aof\Writing\" />
+    <Folder Include="Recovery\" />
+    <Folder Include="Rdb\Format\" />
+    <Folder Include="Rdb\Writing\" />
+    <Folder Include="Rdb\Reading\" />
+  </ItemGroup>
+
+</Project>
