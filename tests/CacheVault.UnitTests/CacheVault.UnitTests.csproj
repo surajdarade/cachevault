@@ -15,9 +15,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\CacheVault.Core\CacheVault.Core.csproj" />
-    <ProjectReference Include="..\CacheVault.Protocol\CacheVault.Protocol.csproj" />
-    <ProjectReference Include="..\CacheVault.Server\CacheVault.Server.csproj" />
+    <ProjectReference Include="..\..\CacheVault.Core\CacheVault.Core.csproj" />
+    <ProjectReference Include="..\..\CacheVault.Protocol\CacheVault.Protocol.csproj" />
+    <ProjectReference Include="..\..\CacheVault.Server\CacheVault.Server.csproj" />
   </ItemGroup>
 
   <ItemGroup>

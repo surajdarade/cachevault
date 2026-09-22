@@ -1,5 +1,8 @@
 <Solution>
   <Folder Name="/benchmarks/" />
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="CacheVault.Core/CacheVault.Core.csproj" Id="b7f0adc5-bc6c-4c4c-b039-767569265cca" />
     <Project Path="CacheVault.Infrastructure/CacheVault.Infrastructure.csproj" Id="cdb0c653-a342-42d8-b84c-3225accbc1f8" />
@@ -9,6 +12,7 @@
     <Project Path="CacheVault.Server/CacheVault.Server.csproj" Id="474d1f9f-ae95-4ef9-8642-d716373d7b1c" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="CacheVault.UnitTests/CacheVault.UnitTests.csproj" Id="67215ac2-36b1-435e-bddf-2b15d15f80d0" />
+    <Project Path="tests/CacheVault.IntegrationTests/CacheVault.IntegrationTests.csproj" Id="b579a150-9162-4a07-95a8-983593c1a619" />
+    <Project Path="tests/CacheVault.UnitTests/CacheVault.UnitTests.csproj" />
   </Folder>
 </Solution>
