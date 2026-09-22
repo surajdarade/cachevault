@@ -33,7 +33,8 @@ public sealed class CacheVaultTestServer : IAsyncDisposable {
             services.BuildServiceProvider();
 
         _server =
-            _serviceProvider.GetRequiredService<IRedisTcpServer>();
+            _serviceProvider.GetRequiredService<
+                IRedisTcpServer>();
     }
 
     public IPEndPoint LocalEndpoint =>
@@ -58,6 +59,11 @@ public sealed class CacheVaultTestServer : IAsyncDisposable {
             "CacheVault server failed to start.");
     }
 
+    public async Task StopAsync() {
+        await _server.StopAsync(
+            CancellationToken.None);
+    }
+
     public async ValueTask DisposeAsync() {
         _cancellationTokenSource.Cancel();
 
@@ -66,7 +72,6 @@ public sealed class CacheVaultTestServer : IAsyncDisposable {
                 await _serverTask;
             }
             catch (OperationCanceledException) {
-                // Expected during shutdown.
             }
         }
 

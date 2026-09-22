@@ -14,16 +14,27 @@ public sealed class RedisTcpServer : IRedisTcpServer {
     private readonly ConcurrentDictionary<Guid, Task> _clientTasks =
         new();
 
+    private readonly object _lifecycleLock =
+        new();
+
     private TcpListener? _listener;
+
+    private CancellationTokenSource? _serverCancellationTokenSource;
 
     public RedisTcpServer(
         ServerOptions options,
         IClientConnectionHandler connectionHandler) {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(connectionHandler);
+        ArgumentNullException.ThrowIfNull(
+            options);
 
-        _options = options;
-        _connectionHandler = connectionHandler;
+        ArgumentNullException.ThrowIfNull(
+            connectionHandler);
+
+        _options =
+            options;
+
+        _connectionHandler =
+            connectionHandler;
     }
 
     public IPEndPoint? LocalEndpoint =>
@@ -31,26 +42,48 @@ public sealed class RedisTcpServer : IRedisTcpServer {
 
     public async Task StartAsync(
         CancellationToken cancellationToken) {
-        if (_listener is not null) {
-            throw new InvalidOperationException(
-                "The TCP server has already been started.");
+        lock (_lifecycleLock) {
+            if (_listener is not null) {
+                throw new InvalidOperationException(
+                    "The TCP server has already been started.");
+            }
+
+            _serverCancellationTokenSource =
+                CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken);
+
+            IPAddress address =
+                IPAddress.Parse(
+                    _options.Host);
+
+            _listener =
+                new TcpListener(
+                    address,
+                    _options.Port);
+
+            _listener.Start();
         }
 
-        IPAddress address =
-            IPAddress.Parse(_options.Host);
-
-        _listener =
-            new TcpListener(
-                address,
-                _options.Port);
-
-        _listener.Start();
+        CancellationToken serverCancellationToken =
+            _serverCancellationTokenSource.Token;
 
         try {
-            while (!cancellationToken.IsCancellationRequested) {
-                TcpClient client =
-                    await _listener.AcceptTcpClientAsync(
-                        cancellationToken);
+            while (!serverCancellationToken.IsCancellationRequested) {
+                TcpClient client;
+
+                try {
+                    client =
+                        await _listener.AcceptTcpClientAsync(
+                            serverCancellationToken);
+                }
+                catch (OperationCanceledException)
+                    when (serverCancellationToken.IsCancellationRequested) {
+                    break;
+                }
+                catch (SocketException)
+                    when (serverCancellationToken.IsCancellationRequested) {
+                    break;
+                }
 
                 Guid connectionId =
                     Guid.NewGuid();
@@ -59,26 +92,48 @@ public sealed class RedisTcpServer : IRedisTcpServer {
                     HandleClientAsync(
                         connectionId,
                         client,
-                        cancellationToken);
+                        serverCancellationToken);
 
                 _clientTasks.TryAdd(
                     connectionId,
                     clientTask);
             }
         }
-        catch (OperationCanceledException)
-            when (cancellationToken.IsCancellationRequested) {
-            // Normal shutdown.
-        }
         finally {
-            _listener.Stop();
-            _listener = null;
+            StopListener();
+
+            CancellationTokenSource?
+                serverCancellationTokenSource;
+
+            lock (_lifecycleLock) {
+                serverCancellationTokenSource =
+                    _serverCancellationTokenSource;
+
+                _serverCancellationTokenSource =
+                    null;
+            }
+
+            serverCancellationTokenSource?.Dispose();
         }
     }
 
     public async Task StopAsync(
         CancellationToken cancellationToken) {
-        _listener?.Stop();
+        CancellationTokenSource?
+            serverCancellationTokenSource;
+
+        lock (_lifecycleLock) {
+            serverCancellationTokenSource =
+                _serverCancellationTokenSource;
+        }
+
+        if (serverCancellationTokenSource is null) {
+            return;
+        }
+
+        serverCancellationTokenSource.Cancel();
+
+        StopListener();
 
         Task[] clientTasks =
             _clientTasks.Values.ToArray();
@@ -89,8 +144,23 @@ public sealed class RedisTcpServer : IRedisTcpServer {
 
         await Task.WhenAll(
             clientTasks.Select(
-                task => task.WaitAsync(
-                    cancellationToken)));
+                task =>
+                    task.WaitAsync(
+                        cancellationToken)));
+    }
+
+    private void StopListener() {
+        TcpListener? listener;
+
+        lock (_lifecycleLock) {
+            listener =
+                _listener;
+
+            _listener =
+                null;
+        }
+
+        listener?.Stop();
     }
 
     private async Task HandleClientAsync(

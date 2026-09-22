@@ -528,6 +528,7 @@ public sealed class RedisTcpServerTests {
         await server.StartAsync();
 
         const int clientCount = 10;
+
         const int incrementsPerClient = 100;
 
         var clients =
@@ -575,9 +576,168 @@ public sealed class RedisTcpServerTests {
         }
     }
 
+    [Fact]
+    public async Task ClientDisconnect_DoesNotAffectOtherClients() {
+        await using var server =
+            new CacheVaultTestServer();
+
+        await server.StartAsync();
+
+        await using var clientA =
+            await RedisTestClient.ConnectAsync(
+                server.LocalEndpoint);
+
+        await using var clientB =
+            await RedisTestClient.ConnectAsync(
+                server.LocalEndpoint);
+
+        RespValue setResponse =
+            await clientA.SendCommandAsync(
+                "SET",
+                "shared-key",
+                "hello");
+
+        var setResult =
+            Assert.IsType<RespSimpleString>(
+                setResponse);
+
+        Assert.Equal(
+            "OK",
+            setResult.Value);
+
+        await clientA.DisposeAsync();
+
+        RespValue getResponse =
+            await clientB.SendCommandAsync(
+                "GET",
+                "shared-key");
+
+        var value =
+            Assert.IsType<RespBulkString>(
+                getResponse);
+
+        Assert.Equal(
+            "hello",
+            value.Value);
+    }
+
+    [Fact]
+    public async Task ClientDisconnect_AllowsNewClientToConnect() {
+        await using var server =
+            new CacheVaultTestServer();
+
+        await server.StartAsync();
+
+        await using (
+            RedisTestClient clientA =
+                await RedisTestClient.ConnectAsync(
+                    server.LocalEndpoint)) {
+            RespValue response =
+                await clientA.SendCommandAsync(
+                    "SET",
+                    "key",
+                    "value");
+
+            var result =
+                Assert.IsType<RespSimpleString>(
+                    response);
+
+            Assert.Equal(
+                "OK",
+                result.Value);
+        }
+
+        await using var clientB =
+            await RedisTestClient.ConnectAsync(
+                server.LocalEndpoint);
+
+        RespValue getResponse =
+            await clientB.SendCommandAsync(
+                "GET",
+                "key");
+
+        var value =
+            Assert.IsType<RespBulkString>(
+                getResponse);
+
+        Assert.Equal(
+            "value",
+            value.Value);
+    }
+
+    [Fact]
+    public async Task Server_StopAsync_CompletesWithNoActiveClients() {
+        await using var server =
+            new CacheVaultTestServer();
+
+        await server.StartAsync();
+
+        await server.StopAsync();
+    }
+
+    [Fact]
+    public async Task Server_StopAsync_CompletesWithActiveClient() {
+        await using var server =
+            new CacheVaultTestServer();
+
+        await server.StartAsync();
+
+        await using var client =
+            await RedisTestClient.ConnectAsync(
+                server.LocalEndpoint);
+
+        await client.SendCommandAsync(
+            "PING");
+
+        await server.StopAsync();
+    }
+
+    [Fact]
+    public async Task Server_StopAsync_CompletesWithMultipleActiveClients() {
+        await using var server =
+            new CacheVaultTestServer();
+
+        await server.StartAsync();
+
+        const int clientCount = 10;
+
+        var clients =
+            new List<RedisTestClient>(
+                clientCount);
+
+        try {
+            for (int i = 0; i < clientCount; i++) {
+                RedisTestClient client =
+                    await RedisTestClient.ConnectAsync(
+                        server.LocalEndpoint);
+
+                clients.Add(client);
+
+                RespValue response =
+                    await client.SendCommandAsync(
+                        "PING");
+
+                var pong =
+                    Assert.IsType<RespSimpleString>(
+                        response);
+
+                Assert.Equal(
+                    "PONG",
+                    pong.Value);
+            }
+
+            await server.StopAsync();
+        }
+        finally {
+            foreach (RedisTestClient client in clients) {
+                await client.DisposeAsync();
+            }
+        }
+    }
+
     private static async Task IncrementCounterAsync(
-    RedisTestClient client,
-    int incrementCount) {
+        RedisTestClient client,
+        int incrementCount) {
         for (int i = 0; i < incrementCount; i++) {
             RespValue response =
                 await client.SendCommandAsync(
