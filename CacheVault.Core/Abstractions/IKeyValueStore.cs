@@ -9,7 +9,8 @@ public interface IKeyValueStore {
 
     void Set(
         string key,
-        string value);
+        string value,
+        DateTimeOffset? expiresAt = null);
 
     bool Remove(
         string key);

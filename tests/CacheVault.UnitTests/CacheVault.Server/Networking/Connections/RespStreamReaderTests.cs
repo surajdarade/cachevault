@@ -5,7 +5,7 @@ using CacheVault.Protocol.Resp.Parsing;
 using CacheVault.Protocol.Resp.Types;
 using CacheVault.Server.Networking.Connections;
 
-namespace CacheVault.UnitTests.CacheVault.Server.Connections;
+namespace CacheVault.UnitTests.CacheVault.Server.Networking.Connections;
 
 public sealed class RespStreamReaderTests {
     [Fact]

@@ -6,17 +6,31 @@ namespace CacheVault.Server.Commands.Dispatch;
 
 public static class CommandRegistry {
     public static IReadOnlyList<IRedisCommand> CreateDefaultCommands(
-        IKeyValueStore store) {
-        ArgumentNullException.ThrowIfNull(store);
+        IKeyValueStore store,
+        IClock clock,
+        CommandDispatcher dispatcher) {
+        ArgumentNullException.ThrowIfNull(
+            store);
+
+        ArgumentNullException.ThrowIfNull(
+            clock);
+
+        ArgumentNullException.ThrowIfNull(
+            dispatcher);
 
         return
         [
             new PingCommand(),
             new EchoCommand(),
-            new SetCommand(store),
+            new SetCommand(store, clock),
             new GetCommand(store),
             new DelCommand(store),
-            new IncrCommand(store)
+            new IncrCommand(store),
+            new TtlCommand(store, clock),
+            new PttlCommand(store, clock),
+            new MultiCommand(),
+            new ExecCommand(dispatcher),
+            new DiscardCommand()
         ];
     }
 }

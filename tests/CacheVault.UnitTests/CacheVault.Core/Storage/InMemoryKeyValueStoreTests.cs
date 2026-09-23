@@ -1,9 +1,20 @@
 ﻿using CacheVault.Core.Storage;
+using CacheVault.UnitTests.CacheVault.Infrastructure;
 
 namespace CacheVault.UnitTests.CacheVault.Core.Storage;
 
 public sealed class InMemoryKeyValueStoreTests {
-    private readonly InMemoryKeyValueStore _store = new();
+    private readonly TestClock _clock =
+        new(DateTimeOffset.UtcNow);
+
+    private readonly InMemoryKeyValueStore _store;
+
+    public InMemoryKeyValueStoreTests() {
+        _store =
+            new InMemoryKeyValueStore(
+                _clock);
+    }
+
 
     [Fact]
     public void Set_ThenGet_ReturnsValue() {
@@ -233,5 +244,153 @@ public sealed class InMemoryKeyValueStoreTests {
     public void Increment_NullKey_Throws() {
         Assert.Throws<ArgumentNullException>(
             () => _store.Increment(null!));
+    }
+
+    [Fact]
+    public void Set_WithFutureExpiration_ValueRemainsAccessible() {
+        DateTimeOffset expiration =
+            _clock.UtcNow.AddSeconds(10);
+
+        _store.Set(
+            "key",
+            "value",
+            expiration);
+
+        bool exists =
+            _store.TryGet(
+                "key",
+                out var storedValue);
+
+        Assert.True(exists);
+        Assert.NotNull(storedValue);
+        Assert.Equal("value", storedValue.Value);
+        Assert.Equal(
+            expiration,
+            storedValue.ExpiresAt);
+    }
+
+    [Fact]
+    public void Set_WhenExpirationReached_ValueIsExpired() {
+        DateTimeOffset expiration =
+            _clock.UtcNow.AddSeconds(10);
+
+        _store.Set(
+            "key",
+            "value",
+            expiration);
+
+        _clock.Advance(
+            TimeSpan.FromSeconds(10));
+
+        bool exists =
+            _store.TryGet(
+                "key",
+                out var storedValue);
+
+        Assert.False(exists);
+        Assert.Null(storedValue);
+    }
+
+    [Fact]
+    public void Set_WhenExpirationPassed_ValueIsExpired() {
+        DateTimeOffset expiration =
+            _clock.UtcNow.AddSeconds(10);
+
+        _store.Set(
+            "key",
+            "value",
+            expiration);
+
+        _clock.Advance(
+            TimeSpan.FromSeconds(11));
+
+        bool exists =
+            _store.Contains("key");
+
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public void Set_WithoutExpiration_ValueDoesNotExpire() {
+        _store.Set(
+            "key",
+            "value");
+
+        _clock.Advance(
+            TimeSpan.FromDays(365));
+
+        bool exists =
+            _store.TryGet(
+                "key",
+                out var storedValue);
+
+        Assert.True(exists);
+        Assert.NotNull(storedValue);
+        Assert.Equal("value", storedValue.Value);
+        Assert.Null(storedValue.ExpiresAt);
+    }
+
+    [Fact]
+    public void Set_ReplacingExpiringValue_RemovesPreviousExpiration() {
+        DateTimeOffset expiration =
+            _clock.UtcNow.AddSeconds(10);
+
+        _store.Set(
+            "key",
+            "value",
+            expiration);
+
+        _store.Set(
+            "key",
+            "new-value");
+
+        _clock.Advance(
+            TimeSpan.FromSeconds(20));
+
+        bool exists =
+            _store.TryGet(
+                "key",
+                out var storedValue);
+
+        Assert.True(exists);
+        Assert.NotNull(storedValue);
+        Assert.Equal(
+            "new-value",
+            storedValue.Value);
+        Assert.Null(storedValue.ExpiresAt);
+    }
+
+    [Fact]
+    public void Increment_OnExpiredValue_CreatesNewPersistentValue() {
+        DateTimeOffset expiration =
+            _clock.UtcNow.AddSeconds(10);
+
+        _store.Set(
+            "counter",
+            "10",
+            expiration);
+
+        _clock.Advance(
+            TimeSpan.FromSeconds(10));
+
+        long result =
+            _store.Increment(
+                "counter");
+
+        Assert.Equal(
+            1,
+            result);
+
+        bool exists =
+            _store.TryGet(
+                "counter",
+                out var storedValue);
+
+        Assert.True(exists);
+        Assert.NotNull(storedValue);
+        Assert.Equal(
+            "1",
+            storedValue.Value);
+        Assert.Null(storedValue.ExpiresAt);
     }
 }

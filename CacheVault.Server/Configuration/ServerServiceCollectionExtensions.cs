@@ -1,8 +1,10 @@
 ﻿using CacheVault.Core.Abstractions;
 using CacheVault.Core.Storage;
+using CacheVault.Infrastructure.Time;
 using CacheVault.Protocol.Resp.Abstractions;
 using CacheVault.Protocol.Resp.Parsing;
 using CacheVault.Protocol.Resp.Serialization;
+using CacheVault.Server.Commands.Abstractions;
 using CacheVault.Server.Commands.Dispatch;
 using CacheVault.Server.Networking.Abstractions;
 using CacheVault.Server.Networking.Connections;
@@ -25,6 +27,10 @@ public static class ServerServiceCollectionExtensions {
             options);
 
         services.AddSingleton<
+            IClock,
+            SystemClock>();
+
+        services.AddSingleton<
             IRespParser,
             RespParser>();
 
@@ -44,12 +50,24 @@ public static class ServerServiceCollectionExtensions {
             serviceProvider =>
             {
                 IKeyValueStore store =
-                    serviceProvider.GetRequiredService<
-                        IKeyValueStore>();
+                    serviceProvider.GetRequiredService<IKeyValueStore>();
 
-                return new CommandDispatcher(
+                IClock clock =
+                    serviceProvider.GetRequiredService<IClock>();
+
+                var dispatcher =
+                    new CommandDispatcher();
+
+                IReadOnlyList<IRedisCommand> commands =
                     CommandRegistry.CreateDefaultCommands(
-                        store));
+                        store,
+                        clock,
+                        dispatcher);
+
+                dispatcher.RegisterCommands(
+                    commands);
+
+                return dispatcher;
             });
 
         services.AddSingleton<

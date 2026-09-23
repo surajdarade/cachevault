@@ -15,7 +15,6 @@
     <Folder Include="DependencyInjection\" />
     <Folder Include="Logging\" />
     <Folder Include="Lifecycle\" />
-    <Folder Include="Time\" />
   </ItemGroup>
 
 </Project>

@@ -3,18 +3,23 @@ using CacheVault.Protocol.Resp.Types;
 using CacheVault.Server.Commands.Abstractions;
 using CacheVault.Server.Commands.Implementations;
 using CacheVault.Server.Networking.Connections;
+using CacheVault.UnitTests.CacheVault.Infrastructure;
 
 
 namespace CacheVault.UnitTests.CacheVault.Server.Commands.Implementations;
 
 public sealed class GetCommandTests {
-    private readonly InMemoryKeyValueStore _store = new();
+    private readonly TestClock _clock = new(DateTimeOffset.UtcNow);
+    private readonly InMemoryKeyValueStore _store;
     private readonly CommandContext _context;
 
     public GetCommandTests() {
         _context = new CommandContext(
             new ClientSession(),
             CancellationToken.None);
+        _store =
+            new InMemoryKeyValueStore(
+            _clock);
     }
 
     [Fact]

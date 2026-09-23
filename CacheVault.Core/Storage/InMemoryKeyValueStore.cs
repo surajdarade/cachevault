@@ -5,115 +5,188 @@ using CacheVault.Core.Models;
 namespace CacheVault.Core.Storage;
 
 public sealed class InMemoryKeyValueStore : IKeyValueStore {
-    private readonly ConcurrentDictionary<string, StoredValue> _store =
-        new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, StoredValue> _values =
+        new();
+
+    private readonly IClock _clock;
 
     private long _version;
+
+    public InMemoryKeyValueStore(
+        IClock clock) {
+        ArgumentNullException.ThrowIfNull(
+            clock);
+
+        _clock =
+            clock;
+    }
 
     public bool TryGet(
         string key,
         out StoredValue? value) {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(
+            key);
 
-        return _store.TryGetValue(
-            key,
-            out value);
+        if (!_values.TryGetValue(
+                key,
+                out StoredValue? storedValue)) {
+            value = null;
+
+            return false;
+        }
+
+        if (IsExpired(storedValue)) {
+            _values.TryRemove(
+                new KeyValuePair<string, StoredValue>(
+                    key,
+                    storedValue));
+
+            value = null;
+
+            return false;
+        }
+
+        value =
+            storedValue;
+
+        return true;
     }
 
     public void Set(
         string key,
-        string value) {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        ArgumentNullException.ThrowIfNull(value);
+        string value,
+        DateTimeOffset? expiresAt = null) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(
+            key);
 
-        long version = Interlocked.Increment(
-            ref _version);
+        ArgumentNullException.ThrowIfNull(
+            value);
 
-        _store[key] = new StoredValue(value)
-        {
-            Version = version
-        };
+        long version =
+            Interlocked.Increment(
+                ref _version);
+
+        var storedValue =
+            new StoredValue(
+                value,
+                expiresAt)
+            {
+                Version = version
+            };
+
+        _values[key] =
+            storedValue;
     }
 
     public bool Remove(
         string key) {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(
+            key);
 
-        bool removed = _store.TryRemove(
+        return _values.TryRemove(
             key,
             out _);
-
-        if (removed) {
-            Interlocked.Increment(
-                ref _version);
-        }
-
-        return removed;
     }
 
     public bool Contains(
         string key) {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-
-        return _store.ContainsKey(key);
+        return TryGet(
+            key,
+            out _);
     }
 
     public long Increment(
         string key,
         long amount = 1) {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(
+            key);
 
         while (true) {
-            if (!_store.TryGetValue(
+            if (!_values.TryGetValue(
                     key,
-                    out StoredValue? existing)) {
-                long newValue = amount;
+                    out StoredValue? current)) {
+                long initialValue;
 
-                var created = new StoredValue(
-                    newValue.ToString())
-                {
-                    Version = Interlocked.Increment(
-                        ref _version)
-                };
+                try {
+                    initialValue =
+                        checked(amount);
+                }
+                catch (OverflowException exception) {
+                    throw new InvalidOperationException(
+                        "Increment would overflow the integer range.",
+                        exception);
+                }
 
-                if (_store.TryAdd(key, created)) {
-                    return newValue;
+                long version =
+                    Interlocked.Increment(
+                        ref _version);
+
+                var newStoredValue =
+                    new StoredValue(
+                        initialValue.ToString())
+                    {
+                        Version = version
+                    };
+
+                if (_values.TryAdd(
+                        key,
+                        newStoredValue)) {
+                    return initialValue;
                 }
 
                 continue;
             }
 
+            if (IsExpired(current)) {
+                _values.TryRemove(
+                    new KeyValuePair<string, StoredValue>(
+                        key,
+                        current));
+
+                continue;
+            }
+
             if (!long.TryParse(
-                    existing.Value,
+                    current.Value,
                     out long currentValue)) {
                 throw new InvalidOperationException(
-                    "ERR value is not an integer or out of range");
+                    "Value is not an integer.");
             }
 
             long updatedValue;
 
             try {
-                updatedValue = checked(
-                    currentValue + amount);
+                updatedValue =
+                    checked(
+                        currentValue + amount);
             }
-            catch (OverflowException) {
+            catch (OverflowException exception) {
                 throw new InvalidOperationException(
-                    "ERR increment or decrement would overflow");
+                    "Increment would overflow the integer range.",
+                    exception);
             }
 
-            var replacement = new StoredValue(
-                updatedValue.ToString())
-            {
-                Version = Interlocked.Increment(
-                    ref _version)
-            };
+            var updatedStoredValue =
+                new StoredValue(
+                    updatedValue.ToString())
+                {
+                    Version =
+                        Interlocked.Increment(
+                            ref _version)
+                };
 
-            if (_store.TryUpdate(
+            if (_values.TryUpdate(
                     key,
-                    replacement,
-                    existing)) {
+                    updatedStoredValue,
+                    current)) {
                 return updatedValue;
             }
         }
+    }
+
+    private bool IsExpired(
+        StoredValue value) {
+        return value.ExpiresAt.HasValue &&
+               value.ExpiresAt.Value <= _clock.UtcNow;
     }
 }

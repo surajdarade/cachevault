@@ -5,9 +5,16 @@ using CacheVault.Server.Commands.Abstractions;
 namespace CacheVault.Server.Commands.Implementations;
 
 public sealed class IncrCommand : IRedisCommand {
+    private const string InvalidIntegerError =
+        "ERR value is not an integer or out of range";
+
     private readonly IKeyValueStore _store;
 
-    public IncrCommand(IKeyValueStore store) {
+    public IncrCommand(
+        IKeyValueStore store) {
+        ArgumentNullException.ThrowIfNull(
+            store);
+
         _store = store;
     }
 
@@ -28,14 +35,16 @@ public sealed class IncrCommand : IRedisCommand {
         }
 
         try {
-            long value = _store.Increment(key.Value);
+            long value =
+                _store.Increment(
+                    key.Value);
 
             return ValueTask.FromResult<RespValue>(
                 new RespInteger(value));
         }
-        catch (InvalidOperationException exception) {
+        catch (InvalidOperationException) {
             throw new CommandArgumentException(
-                exception.Message);
+                InvalidIntegerError);
         }
     }
 }

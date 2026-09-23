@@ -3,12 +3,30 @@ using CacheVault.Protocol.Resp.Types;
 using CacheVault.Server.Commands.Abstractions;
 using CacheVault.Server.Commands.Dispatch;
 using CacheVault.Server.Networking.Connections;
+using CacheVault.UnitTests.CacheVault.Infrastructure;
 
 namespace CacheVault.UnitTests.CacheVault.Server.Commands.Dispatch;
 
 public sealed class CommandDispatcherTests {
-    private readonly CommandDispatcher _dispatcher =
-        new(CommandRegistry.CreateDefaultCommands(new InMemoryKeyValueStore()));
+    private readonly TestClock _clock =
+        new(DateTimeOffset.UtcNow);
+
+    private readonly CommandDispatcher _dispatcher;
+
+    public CommandDispatcherTests() {
+        var store =
+            new InMemoryKeyValueStore(
+                _clock);
+
+        _dispatcher =
+            new CommandDispatcher();
+
+        _dispatcher.RegisterCommands(
+            CommandRegistry.CreateDefaultCommands(
+                store,
+                _clock,
+                _dispatcher));
+    }
 
     private static CommandContext CreateContext() {
         return new CommandContext(
@@ -98,9 +116,10 @@ public sealed class CommandDispatcherTests {
         ]);
 
         await Assert.ThrowsAsync<CommandArgumentException>(
-            async () => await _dispatcher.DispatchAsync(
-                CreateContext(),
-                request));
+            async () =>
+                await _dispatcher.DispatchAsync(
+                    CreateContext(),
+                    request));
     }
 
     [Fact]
@@ -108,9 +127,10 @@ public sealed class CommandDispatcherTests {
         var request = new RespArray([]);
 
         await Assert.ThrowsAsync<CommandArgumentException>(
-            async () => await _dispatcher.DispatchAsync(
-                CreateContext(),
-                request));
+            async () =>
+                await _dispatcher.DispatchAsync(
+                    CreateContext(),
+                    request));
     }
 
     [Fact]
@@ -118,8 +138,9 @@ public sealed class CommandDispatcherTests {
         var request = new RespArray(null);
 
         await Assert.ThrowsAsync<CommandArgumentException>(
-            async () => await _dispatcher.DispatchAsync(
-                CreateContext(),
-                request));
+            async () =>
+                await _dispatcher.DispatchAsync(
+                    CreateContext(),
+                    request));
     }
 }

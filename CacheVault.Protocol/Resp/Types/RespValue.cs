@@ -1,4 +1,4 @@
-﻿using CacheVault.Protocol.Rest.Types;
+﻿using CacheVault.Protocol.Resp.Types;
 
 namespace CacheVault.Protocol.Resp.Types;
 
