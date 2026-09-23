@@ -8,16 +8,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CacheVault.Core\CacheVault.Core.csproj" />
+    <ProjectReference Include="..\CacheVault.Persistence\CacheVault.Persistence.csproj" />
     <ProjectReference Include="..\CacheVault.Protocol\CacheVault.Protocol.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Abstractions\" />
-    <Folder Include="Master\" />
     <Folder Include="Acknowledgements\" />
     <Folder Include="Synchronization\" />
-    <Folder Include="State\" />
-    <Folder Include="Protocol\" />
     <Folder Include="Replica\" />
   </ItemGroup>
 
