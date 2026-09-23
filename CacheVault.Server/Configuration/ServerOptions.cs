@@ -6,4 +6,12 @@ public sealed class ServerOptions {
     public string Host { get; set; } = "0.0.0.0";
 
     public int Port { get; set; } = 6379;
+
+    public bool EnableRdb { get; set; } = true;
+
+    public string RdbFilePath { get; set; } = "cachevault.rdb";
+
+    public bool EnableAof { get; set; } = true;
+
+    public string AofFilePath { get; set; } = "cachevault.aof";
 }

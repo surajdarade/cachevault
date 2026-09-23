@@ -4,12 +4,14 @@ using CacheVault.Core.Models;
 
 namespace CacheVault.Core.Storage;
 
-public sealed class InMemoryKeyValueStore : IKeyValueStore {
+public sealed class InMemoryKeyValueStore :
+    IKeyValueStore,
+    IKeyValueStoreSnapshot {
     private readonly ConcurrentDictionary<string, StoredValue> _values =
-        new();
+        new(StringComparer.Ordinal);
 
     private readonly ConcurrentDictionary<string, long> _keyVersions =
-        new();
+        new(StringComparer.Ordinal);
 
     private readonly IClock _clock;
 
@@ -17,18 +19,15 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
 
     public InMemoryKeyValueStore(
         IClock clock) {
-        ArgumentNullException.ThrowIfNull(
-            clock);
+        ArgumentNullException.ThrowIfNull(clock);
 
-        _clock =
-            clock;
+        _clock = clock;
     }
 
     public bool TryGet(
         string key,
         out StoredValue? value) {
-        ArgumentException.ThrowIfNullOrWhiteSpace(
-            key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
         if (!_values.TryGetValue(
                 key,
@@ -43,12 +42,12 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
                     new KeyValuePair<string, StoredValue>(
                         key,
                         storedValue))) {
-                long version =
+                long expirationVersion =
                     Interlocked.Increment(
                         ref _version);
 
                 _keyVersions[key] =
-                    version;
+                    expirationVersion;
             }
 
             value = null;
@@ -56,8 +55,7 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
             return false;
         }
 
-        value =
-            storedValue;
+        value = storedValue;
 
         return true;
     }
@@ -66,11 +64,8 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
         string key,
         string value,
         DateTimeOffset? expiresAt = null) {
-        ArgumentException.ThrowIfNullOrWhiteSpace(
-            key);
-
-        ArgumentNullException.ThrowIfNull(
-            value);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(value);
 
         long version =
             Interlocked.Increment(
@@ -93,8 +88,7 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
 
     public bool Remove(
         string key) {
-        ArgumentException.ThrowIfNullOrWhiteSpace(
-            key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
         if (!_values.TryRemove(
                 key,
@@ -114,61 +108,50 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
 
     public bool Contains(
         string key) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+
         return TryGet(
             key,
             out _);
     }
 
     public long Increment(
-    string key,
-    long amount = 1) {
-        ArgumentException.ThrowIfNullOrWhiteSpace(
-            key);
+        string key,
+        long amount = 1) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
         while (true) {
             if (!_values.TryGetValue(
                     key,
-                    out StoredValue? current)) {
-                long initialValue;
-
-                try {
-                    initialValue =
-                        checked(amount);
-                }
-                catch (OverflowException exception) {
-                    throw new InvalidOperationException(
-                        "Increment would overflow the integer range.",
-                        exception);
-                }
-
+                    out StoredValue? currentValue)) {
                 long version =
                     Interlocked.Increment(
                         ref _version);
 
-                var newStoredValue =
+                var createdValue =
                     new StoredValue(
-                        initialValue.ToString())
+                        amount.ToString())
                     {
                         Version = version
                     };
 
                 if (_values.TryAdd(
                         key,
-                        newStoredValue)) {
+                        createdValue)) {
                     _keyVersions[key] =
                         version;
 
-                    return initialValue;
+                    return amount;
                 }
 
                 continue;
             }
 
-            if (IsExpired(current)) {
+            if (IsExpired(currentValue)) {
                 if (_values.TryRemove(
                         new KeyValuePair<string, StoredValue>(
                             key,
-                            current))) {
+                            currentValue))) {
                     long expirationVersion =
                         Interlocked.Increment(
                             ref _version);
@@ -181,55 +164,52 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
             }
 
             if (!long.TryParse(
-                    current.Value,
-                    out long currentValue)) {
+                    currentValue.Value,
+                    out long currentNumber)) {
                 throw new InvalidOperationException(
-                    "Value is not an integer.");
+                    "Value is not an integer or is out of range.");
             }
 
-            long updatedValue;
+            long newNumber;
 
             try {
-                updatedValue =
+                newNumber =
                     checked(
-                        currentValue + amount);
+                        currentNumber + amount);
             }
-            catch (OverflowException exception) {
+            catch (OverflowException) {
                 throw new InvalidOperationException(
-                    "Increment would overflow the integer range.",
-                    exception);
+                    "Value is not an integer or is out of range.");
             }
 
             long updatedVersion =
                 Interlocked.Increment(
                     ref _version);
 
-            var updatedStoredValue =
+            var updatedValue =
                 new StoredValue(
-                    updatedValue.ToString())
+                    newNumber.ToString(),
+                    currentValue.ExpiresAt)
                 {
                     Version = updatedVersion
                 };
 
             if (_values.TryUpdate(
                     key,
-                    updatedStoredValue,
-                    current)) {
+                    updatedValue,
+                    currentValue)) {
                 _keyVersions[key] =
                     updatedVersion;
 
-                return updatedValue;
+                return newNumber;
             }
         }
     }
 
     public long GetVersion(
         string key) {
-        ArgumentException.ThrowIfNullOrWhiteSpace(
-            key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
-        // Force lazy expiration to be processed before
-        // returning the current version.
         TryGet(
             key,
             out _);
@@ -237,13 +217,47 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
         return _keyVersions.TryGetValue(
             key,
             out long version)
-                ? version
-                : 0;
+            ? version
+            : 0;
+    }
+
+    public IReadOnlyList<PersistentKeyValue> GetSnapshot() {
+        var snapshot =
+            new List<PersistentKeyValue>(
+                _values.Count);
+
+        foreach (KeyValuePair<string, StoredValue> entry
+            in _values) {
+            if (IsExpired(entry.Value)) {
+                if (_values.TryRemove(
+                        new KeyValuePair<string, StoredValue>(
+                            entry.Key,
+                            entry.Value))) {
+                    long expirationVersion =
+                        Interlocked.Increment(
+                            ref _version);
+
+                    _keyVersions[entry.Key] =
+                        expirationVersion;
+                }
+
+                continue;
+            }
+
+            snapshot.Add(
+                new PersistentKeyValue(
+                    entry.Key,
+                    entry.Value.Value,
+                    entry.Value.ExpiresAt));
+        }
+
+        return snapshot;
     }
 
     private bool IsExpired(
         StoredValue value) {
         return value.ExpiresAt.HasValue &&
-               value.ExpiresAt.Value <= _clock.UtcNow;
+               value.ExpiresAt.Value <=
+               _clock.UtcNow;
     }
 }

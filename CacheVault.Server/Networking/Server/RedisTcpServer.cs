@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using CacheVault.Server.Configuration;
 using CacheVault.Server.Networking.Abstractions;
+using CacheVault.Server.Recovery;
 
 namespace CacheVault.Server.Networking.Server;
 
@@ -10,6 +11,8 @@ public sealed class RedisTcpServer : IRedisTcpServer {
     private readonly ServerOptions _options;
 
     private readonly IClientConnectionHandler _connectionHandler;
+
+    private readonly RecoveryCoordinator _recoveryCoordinator;
 
     private readonly ConcurrentDictionary<Guid, Task> _clientTasks =
         new();
@@ -23,18 +26,25 @@ public sealed class RedisTcpServer : IRedisTcpServer {
 
     public RedisTcpServer(
         ServerOptions options,
-        IClientConnectionHandler connectionHandler) {
+        IClientConnectionHandler connectionHandler,
+        RecoveryCoordinator recoveryCoordinator) {
         ArgumentNullException.ThrowIfNull(
             options);
 
         ArgumentNullException.ThrowIfNull(
             connectionHandler);
 
+        ArgumentNullException.ThrowIfNull(
+            recoveryCoordinator);
+
         _options =
             options;
 
         _connectionHandler =
             connectionHandler;
+
+        _recoveryCoordinator =
+            recoveryCoordinator;
     }
 
     public IPEndPoint? LocalEndpoint =>
@@ -51,23 +61,36 @@ public sealed class RedisTcpServer : IRedisTcpServer {
             _serverCancellationTokenSource =
                 CancellationTokenSource.CreateLinkedTokenSource(
                     cancellationToken);
-
-            IPAddress address =
-                IPAddress.Parse(
-                    _options.Host);
-
-            _listener =
-                new TcpListener(
-                    address,
-                    _options.Port);
-
-            _listener.Start();
         }
 
         CancellationToken serverCancellationToken =
             _serverCancellationTokenSource.Token;
 
         try {
+            await _recoveryCoordinator
+                .RecoverAsync(
+                    _options,
+                    DateTimeOffset.UtcNow,
+                    serverCancellationToken)
+                .ConfigureAwait(false);
+
+            lock (_lifecycleLock) {
+                if (serverCancellationToken.IsCancellationRequested) {
+                    return;
+                }
+
+                IPAddress address =
+                    IPAddress.Parse(
+                        _options.Host);
+
+                _listener =
+                    new TcpListener(
+                        address,
+                        _options.Port);
+
+                _listener.Start();
+            }
+
             while (!serverCancellationToken.IsCancellationRequested) {
                 TcpClient client;
 

@@ -8,16 +8,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CacheVault.Core\CacheVault.Core.csproj" />
+    <ProjectReference Include="..\CacheVault.Protocol\CacheVault.Protocol.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Folder Include="Abstractions\" />
-    <Folder Include="Aof\Reading\" />
-    <Folder Include="Aof\Writing\" />
-    <Folder Include="Recovery\" />
-    <Folder Include="Rdb\Format\" />
-    <Folder Include="Rdb\Writing\" />
-    <Folder Include="Rdb\Reading\" />
   </ItemGroup>
 
 </Project>

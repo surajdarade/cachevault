@@ -15,9 +15,32 @@ public sealed class CommandDispatcher {
             "UNWATCH"
         };
 
+    private static readonly HashSet<string> PersistentCommands =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "SET",
+            "DEL",
+            "INCR"
+        };
+
     private IReadOnlyDictionary<string, IRedisCommand> _commands =
         new Dictionary<string, IRedisCommand>(
             StringComparer.OrdinalIgnoreCase);
+
+    private ICommandPersistence? _persistence;
+
+    public void RegisterPersistence(
+        ICommandPersistence persistence) {
+        ArgumentNullException.ThrowIfNull(
+            persistence);
+
+        if (_persistence is not null) {
+            throw new InvalidOperationException(
+                "Command persistence has already been registered.");
+        }
+
+        _persistence = persistence;
+    }
 
     public void RegisterCommands(
         IEnumerable<IRedisCommand> commands) {
@@ -35,11 +58,14 @@ public sealed class CommandDispatcher {
                 StringComparer.OrdinalIgnoreCase);
     }
 
-    public ValueTask<RespValue> DispatchAsync(
+    public async ValueTask<RespValue> DispatchAsync(
         CommandContext context,
         RespArray request) {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(
+            context);
+
+        ArgumentNullException.ThrowIfNull(
+            request);
 
         if (request.Values is null ||
             request.Values.Count == 0) {
@@ -72,20 +98,32 @@ public sealed class CommandDispatcher {
                     command.Name,
                     arguments));
 
-            return ValueTask.FromResult<RespValue>(
-                new RespSimpleString("QUEUED"));
+            return new RespSimpleString("QUEUED");
         }
 
-        return command.ExecuteAsync(
-            context,
-            arguments);
+        RespValue result =
+            await command.ExecuteAsync(
+                context,
+                arguments);
+
+        if (ShouldPersist(command.Name)) {
+            await PersistAsync(
+                command.Name,
+                arguments,
+                context.CancellationToken);
+        }
+
+        return result;
     }
 
-    public ValueTask<RespValue> ExecuteQueuedCommandAsync(
+    public async ValueTask<RespValue> ExecuteQueuedCommandAsync(
         CommandContext context,
         QueuedCommand queuedCommand) {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(queuedCommand);
+        ArgumentNullException.ThrowIfNull(
+            context);
+
+        ArgumentNullException.ThrowIfNull(
+            queuedCommand);
 
         if (!_commands.TryGetValue(
                 queuedCommand.Name,
@@ -94,8 +132,60 @@ public sealed class CommandDispatcher {
                 $"ERR unknown command '{queuedCommand.Name.ToLowerInvariant()}'");
         }
 
-        return command.ExecuteAsync(
-            context,
-            queuedCommand.Arguments);
+        RespValue result =
+            await command.ExecuteAsync(
+                context,
+                queuedCommand.Arguments);
+
+        if (ShouldPersist(command.Name)) {
+            await PersistAsync(
+                command.Name,
+                queuedCommand.Arguments,
+                context.CancellationToken);
+        }
+
+        return result;
+    }
+
+    private async ValueTask PersistAsync(
+        string commandName,
+        IReadOnlyList<RespValue> arguments,
+        CancellationToken cancellationToken) {
+        if (_persistence is null) {
+            return;
+        }
+
+        string[] stringArguments =
+            ConvertArguments(arguments);
+
+        await _persistence.PersistAsync(
+            commandName,
+            stringArguments,
+            cancellationToken);
+    }
+
+    private static bool ShouldPersist(
+        string commandName) {
+        return PersistentCommands.Contains(
+            commandName);
+    }
+
+    private static string[] ConvertArguments(
+        IReadOnlyList<RespValue> arguments) {
+        var result =
+            new string[arguments.Count];
+
+        for (int i = 0; i < arguments.Count; i++) {
+            if (arguments[i] is not RespBulkString bulkString ||
+                bulkString.Value is null) {
+                throw new CommandArgumentException(
+                    "ERR persistent command arguments must be non-null bulk strings");
+            }
+
+            result[i] =
+                bulkString.Value;
+        }
+
+        return result;
     }
 }
