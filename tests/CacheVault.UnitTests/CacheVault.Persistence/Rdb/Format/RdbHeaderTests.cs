@@ -4,7 +4,7 @@ namespace CacheVault.UnitTests.CacheVault.Persistence.Rdb.Format;
 
 public sealed class RdbHeaderTests {
     [Fact]
-    public void WriteHeader_WritesMagicAndVersion() {
+    public void WriteHeader_WritesMagicVersionAndAofOffset() {
         using var stream =
             new MemoryStream();
 
@@ -14,7 +14,8 @@ public sealed class RdbHeaderTests {
 
         var header =
             new RdbHeader(
-                RdbHeader.CurrentVersion);
+                RdbHeader.CurrentVersion,
+                0);
 
         RdbHeaderWriter.WriteHeader(
             writer,
@@ -26,7 +27,15 @@ public sealed class RdbHeaderTests {
                 (byte)'V',
                 (byte)'D',
                 (byte)'B',
-                0x01,
+                0x03,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
                 0x00
             ],
             stream.ToArray());
@@ -43,7 +52,8 @@ public sealed class RdbHeaderTests {
 
         var expected =
             new RdbHeader(
-                42);
+                42,
+                12345);
 
         RdbHeaderWriter.WriteHeader(
             writer,
@@ -69,7 +79,15 @@ public sealed class RdbHeaderTests {
                 (byte)'E',
                 (byte)'D',
                 (byte)'S',
-                0x01,
+                0x03,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
                 0x00
             ]);
 
@@ -103,13 +121,55 @@ public sealed class RdbHeaderTests {
                 (byte)'V',
                 (byte)'D',
                 (byte)'B',
-                0x01
+                0x03
             ]);
 
         Assert.Throws<EndOfStreamException>(
             () =>
                 RdbHeaderReader.ReadHeader(
                     stream));
+    }
+
+    [Fact]
+    public void ReadHeader_WithTruncatedAofOffset_ThrowsEndOfStreamException() {
+        using var stream =
+            new MemoryStream(
+            [
+                (byte)'C',
+                (byte)'V',
+                (byte)'D',
+                (byte)'B',
+                0x03,
+                0x00,
+                0x39,
+                0x30
+            ]);
+
+        Assert.Throws<EndOfStreamException>(
+            () =>
+                RdbHeaderReader.ReadHeader(
+                    stream));
+    }
+
+    [Fact]
+    public void ReadHeader_WithNegativeAofOffset_ThrowsFormatException() {
+        using var stream =
+            new MemoryStream();
+
+        var writer =
+            new RdbBinaryWriter(
+                stream);
+
+        var header =
+            new RdbHeader(
+                RdbHeader.CurrentVersion,
+                -1);
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () =>
+                RdbHeaderWriter.WriteHeader(
+                    writer,
+                    header));
     }
 
     [Fact]
@@ -123,7 +183,8 @@ public sealed class RdbHeaderTests {
 
         var expected =
             new RdbHeader(
-                1234);
+                1234,
+                987654);
 
         RdbHeaderWriter.WriteHeader(
             writer,
@@ -138,5 +199,38 @@ public sealed class RdbHeaderTests {
         Assert.Equal(
             1234,
             actual.Version);
+
+        Assert.Equal(
+            987654,
+            actual.AofOffset);
+    }
+
+    [Fact]
+    public void ReadHeader_PreservesAofOffset() {
+        using var stream =
+            new MemoryStream();
+
+        var writer =
+            new RdbBinaryWriter(
+                stream);
+
+        var expected =
+            new RdbHeader(
+                RdbHeader.CurrentVersion,
+                123456789);
+
+        RdbHeaderWriter.WriteHeader(
+            writer,
+            expected);
+
+        stream.Position = 0;
+
+        RdbHeader actual =
+            RdbHeaderReader.ReadHeader(
+                stream);
+
+        Assert.Equal(
+            123456789,
+            actual.AofOffset);
     }
 }

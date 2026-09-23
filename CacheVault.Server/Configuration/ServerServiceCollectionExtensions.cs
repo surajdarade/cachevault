@@ -53,44 +53,54 @@ public static class ServerServiceCollectionExtensions {
             IKeyValueStore,
             InMemoryKeyValueStore>();
 
+        if (options.EnableAof) {
+            services.AddSingleton<
+                AofWriter>(
+                serviceProvider => {
+                    IRespSerializer serializer =
+                        serviceProvider.GetRequiredService<
+                            IRespSerializer>();
+
+                    return new AofWriter(
+                        options.AofFilePath,
+                        serializer);
+                });
+
+            services.AddSingleton<
+                ICommandPersistence>(
+                serviceProvider => {
+                    AofWriter writer =
+                        serviceProvider.GetRequiredService<
+                            AofWriter>();
+
+                    IKeyValueStore store =
+                        serviceProvider.GetRequiredService<
+                            IKeyValueStore>();
+
+                    return new AofCommandPersistence(
+                        writer,
+                        store);
+                });
+        }
+        else {
+            services.AddSingleton<
+                ICommandPersistence,
+                NoOpCommandPersistence>();
+        }
+
         services.AddSingleton(
-            serviceProvider =>
-            {
-                if (!options.EnableAof) {
-                    return null;
-                }
-
-                IRespSerializer serializer =
-                    serviceProvider.GetRequiredService<IRespSerializer>();
-
-                return new AofWriter(
-                    options.AofFilePath,
-                    serializer);
-            });
-
-        services.AddSingleton<
-            ICommandPersistence>(
-            serviceProvider =>
-            {
-                AofWriter? writer =
-                    serviceProvider.GetService<AofWriter>();
-
-                return writer is null
-                    ? new NoOpCommandPersistence()
-                    : new AofCommandPersistence(writer);
-            });
-
-        services.AddSingleton(
-            serviceProvider =>
-            {
+            serviceProvider => {
                 IKeyValueStore store =
-                    serviceProvider.GetRequiredService<IKeyValueStore>();
+                    serviceProvider.GetRequiredService<
+                        IKeyValueStore>();
 
                 IClock clock =
-                    serviceProvider.GetRequiredService<IClock>();
+                    serviceProvider.GetRequiredService<
+                        IClock>();
 
                 ICommandPersistence persistence =
-                    serviceProvider.GetRequiredService<ICommandPersistence>();
+                    serviceProvider.GetRequiredService<
+                        ICommandPersistence>();
 
                 var dispatcher =
                     new CommandDispatcher();
@@ -114,13 +124,14 @@ public static class ServerServiceCollectionExtensions {
             RdbSnapshotReader>();
 
         services.AddSingleton(
-            serviceProvider =>
-            {
+            serviceProvider => {
                 IKeyValueStore store =
-                    serviceProvider.GetRequiredService<IKeyValueStore>();
+                    serviceProvider.GetRequiredService<
+                        IKeyValueStore>();
 
                 RdbSnapshotReader reader =
-                    serviceProvider.GetRequiredService<RdbSnapshotReader>();
+                    serviceProvider.GetRequiredService<
+                        RdbSnapshotReader>();
 
                 return new RdbSnapshotLoader(
                     store,
@@ -131,13 +142,14 @@ public static class ServerServiceCollectionExtensions {
             AofCommandReader>();
 
         services.AddSingleton(
-            serviceProvider =>
-            {
+            serviceProvider => {
                 AofCommandReader reader =
-                    serviceProvider.GetRequiredService<AofCommandReader>();
+                    serviceProvider.GetRequiredService<
+                        AofCommandReader>();
 
                 CommandDispatcher dispatcher =
-                    serviceProvider.GetRequiredService<CommandDispatcher>();
+                    serviceProvider.GetRequiredService<
+                        CommandDispatcher>();
 
                 return new AofCommandReplayer(
                     reader,

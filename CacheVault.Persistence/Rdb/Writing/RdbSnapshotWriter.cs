@@ -9,15 +9,18 @@ public sealed class RdbSnapshotWriter {
 
     public RdbSnapshotWriter(
         IKeyValueStoreSnapshot snapshotStore) {
-        ArgumentNullException.ThrowIfNull(snapshotStore);
+        ArgumentNullException.ThrowIfNull(
+            snapshotStore);
 
         _snapshotStore = snapshotStore;
     }
 
     public void Write(
         Stream stream,
-        DateTimeOffset now) {
-        ArgumentNullException.ThrowIfNull(stream);
+        DateTimeOffset now,
+        long aofOffset = 0) {
+        ArgumentNullException.ThrowIfNull(
+            stream);
 
         if (!stream.CanWrite) {
             throw new ArgumentException(
@@ -25,12 +28,20 @@ public sealed class RdbSnapshotWriter {
                 nameof(stream));
         }
 
+        if (aofOffset < 0) {
+            throw new ArgumentOutOfRangeException(
+                nameof(aofOffset),
+                "AOF offset cannot be negative.");
+        }
+
         var writer =
-            new RdbBinaryWriter(stream);
+            new RdbBinaryWriter(
+                stream);
 
         var header =
             new RdbHeader(
-                RdbHeader.CurrentVersion);
+                RdbHeader.CurrentVersion,
+                aofOffset);
 
         RdbHeaderWriter.WriteHeader(
             writer,

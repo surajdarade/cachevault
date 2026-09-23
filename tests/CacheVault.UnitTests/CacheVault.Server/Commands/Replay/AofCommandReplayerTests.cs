@@ -1,125 +1,66 @@
-﻿using CacheVault.Persistence.Aof.Reading;
-using CacheVault.Protocol.Resp.Parsing;
+﻿using System.Text;
+using CacheVault.Persistence.Aof.Reading;
 using CacheVault.Protocol.Resp.Types;
+using CacheVault.Protocol.Resp.Parsing;
 using CacheVault.Server.Commands.Abstractions;
 using CacheVault.Server.Commands.Dispatch;
 using CacheVault.Server.Commands.Replay;
-using CacheVault.Server.Networking.Connections;
-using System.Text;
 
-namespace CacheVault.UnitTests.Commands.Replay;
+namespace CacheVault.UnitTests.Server.Commands.Replay;
 
 public sealed class AofCommandReplayerTests {
     [Fact]
-    public async Task ReplayAsync_ShouldReplayCommandsInOrder() {
-        const string aof =
-            "*3\r\n" +
-            "$3\r\n" +
-            "SET\r\n" +
-            "$3\r\n" +
-            "key\r\n" +
-            "$5\r\n" +
-            "value\r\n" +
-            "*1\r\n" +
-            "$3\r\n" +
-            "GET\r\n";
-
-        using var stream =
-            new MemoryStream(
-                Encoding.UTF8.GetBytes(aof));
+    public async Task ReplayAsync_CompleteAof_ReturnsReplayedCommandCount() {
+        var parser =
+            new RespParser();
 
         var reader =
             new AofCommandReader(
-                new RespParser());
+                parser);
 
         var dispatcher =
             new CommandDispatcher();
 
-        var setCommand = new RecordingCommand("SET");
-        var getCommand = new RecordingCommand("GET");
-
         dispatcher.RegisterCommands(
-            [setCommand, getCommand]);
+            [
+                new RecordingCommand("SET")
+            ]);
+
+        dispatcher.RegisterPersistence(
+            new RecordingPersistence());
 
         var replayer =
             new AofCommandReplayer(
                 reader,
                 dispatcher);
 
-        int replayed =
-            await replayer.ReplayAsync(stream);
-
-        Assert.Equal(2, replayed);
-        Assert.Equal(1, setCommand.ExecutionCount);
-        Assert.Equal(1, getCommand.ExecutionCount);
-    }
-
-    [Fact]
-    public async Task ReplayAsync_ShouldReplayUntilEndOfStream() {
-        const string aof =
-            "*1\r\n" +
-            "$4\r\n" +
-            "PING\r\n" +
-            "*1\r\n" +
-            "$4\r\n" +
-            "PING\r\n" +
-            "*1\r\n" +
-            "$4\r\n" +
-            "PING\r\n";
+        byte[] data =
+            Encoding.UTF8.GetBytes(
+                "*3\r\n" +
+                "$3\r\nSET\r\n" +
+                "$3\r\nkey\r\n" +
+                "$5\r\nvalue\r\n");
 
         using var stream =
-            new MemoryStream(
-                Encoding.UTF8.GetBytes(aof));
+            new MemoryStream(data);
 
-        var reader =
-            new AofCommandReader(
-                new RespParser());
-
-        var dispatcher =
-            new CommandDispatcher();
-
-        var command =
-            new RecordingCommand("PING");
-
-        dispatcher.RegisterCommands(
-            [command]);
-
-        var replayer =
-            new AofCommandReplayer(
-                reader,
-                dispatcher);
-
-        int replayed =
+        int replayedCommands =
             await replayer.ReplayAsync(
                 stream);
 
         Assert.Equal(
-            3,
-            replayed);
-
-        Assert.Equal(
-            3,
-            command.ExecutionCount);
+            1,
+            replayedCommands);
     }
 
     [Fact]
-    public async Task ReplayAsync_ShouldPassCommandArgumentsToDispatcher() {
-        const string aof =
-            "*3\r\n" +
-            "$3\r\n" +
-            "SET\r\n" +
-            "$3\r\n" +
-            "key\r\n" +
-            "$5\r\n" +
-            "value\r\n";
-
-        using var stream =
-            new MemoryStream(
-                Encoding.UTF8.GetBytes(aof));
+    public async Task ReplayAsync_WithStartOffset_ReplaysOnlyCommandsAfterOffset() {
+        var parser =
+            new RespParser();
 
         var reader =
             new AofCommandReader(
-                new RespParser());
+                parser);
 
         var dispatcher =
             new CommandDispatcher();
@@ -128,259 +69,358 @@ public sealed class AofCommandReplayerTests {
             new RecordingCommand("SET");
 
         dispatcher.RegisterCommands(
-            [command]);
+            [
+                command
+            ]);
+
+        dispatcher.RegisterPersistence(
+            new RecordingPersistence());
 
         var replayer =
             new AofCommandReplayer(
                 reader,
                 dispatcher);
 
-        await replayer.ReplayAsync(stream);
+        byte[] firstCommand =
+            Encoding.UTF8.GetBytes(
+                "*3\r\n" +
+                "$3\r\nSET\r\n" +
+                "$3\r\none\r\n" +
+                "$3\r\nold\r\n");
 
-        Assert.Single(command.ExecutedArguments);
+        byte[] secondCommand =
+            Encoding.UTF8.GetBytes(
+                "*3\r\n" +
+                "$3\r\nSET\r\n" +
+                "$3\r\ntwo\r\n" +
+                "$3\r\nnew\r\n");
 
-        Assert.Equal(
-            "key",
-            command.ExecutedArguments[0][0]);
-
-        Assert.Equal(
-             "value",
-             command.ExecutedArguments[0][1]);
-    }
-
-    [Fact]
-    public async Task ReplayAsync_ShouldNotQueueCommandsInTransaction() {
-        const string aof =
-            "*1\r\n" +
-            "$4\r\n" +
-            "PING\r\n";
+        byte[] data =
+            firstCommand
+                .Concat(secondCommand)
+                .ToArray();
 
         using var stream =
-            new MemoryStream(
-                Encoding.UTF8.GetBytes(aof));
+            new MemoryStream(data);
 
-        var reader =
-            new AofCommandReader(
-                new RespParser());
-
-        var dispatcher =
-            new CommandDispatcher();
-
-        var command =
-            new RecordingCommand("PING");
-
-        dispatcher.RegisterCommands(
-            [command]);
-
-        var replayer =
-            new AofCommandReplayer(
-                reader,
-                dispatcher);
-
-        await replayer.ReplayAsync(stream);
+        int replayedCommands =
+            await replayer.ReplayAsync(
+                stream,
+                firstCommand.Length);
 
         Assert.Equal(
             1,
-            command.ExecutionCount);
+            replayedCommands);
+
+        Assert.Equal(
+            ["two"],
+            command.Keys);
     }
 
     [Fact]
-    public async Task ReplayAsync_ShouldRespectCancellation() {
-        const string aof =
-            "*1\r\n" +
-            "$4\r\n" +
-            "PING\r\n";
-
-        using var stream =
-            new MemoryStream(
-                Encoding.UTF8.GetBytes(aof));
+    public async Task ReplayAsync_WithZeroStartOffset_ReplaysEntireAof() {
+        var parser =
+            new RespParser();
 
         var reader =
             new AofCommandReader(
-                new RespParser());
+                parser);
 
         var dispatcher =
             new CommandDispatcher();
 
         var command =
-            new RecordingCommand("PING");
+            new RecordingCommand("SET");
 
         dispatcher.RegisterCommands(
-            [command]);
+            [
+                command
+            ]);
+
+        dispatcher.RegisterPersistence(
+            new RecordingPersistence());
 
         var replayer =
             new AofCommandReplayer(
                 reader,
                 dispatcher);
 
-        using var cancellationTokenSource =
-            new CancellationTokenSource();
+        byte[] data =
+            Encoding.UTF8.GetBytes(
+                "*3\r\n" +
+                "$3\r\nSET\r\n" +
+                "$3\r\none\r\n" +
+                "$3\r\nold\r\n" +
+                "*3\r\n" +
+                "$3\r\nSET\r\n" +
+                "$3\r\ntwo\r\n" +
+                "$3\r\nnew\r\n");
 
-        cancellationTokenSource.Cancel();
+        using var stream =
+            new MemoryStream(data);
 
-        await Assert.ThrowsAsync<OperationCanceledException>(
-            async () =>
-                await replayer.ReplayAsync(
-                    stream,
-                    cancellationTokenSource.Token));
+        int replayedCommands =
+            await replayer.ReplayAsync(
+                stream,
+                0);
+
+        Assert.Equal(
+            2,
+            replayedCommands);
+
+        Assert.Equal(
+            ["one", "two"],
+            command.Keys);
     }
 
     [Fact]
-    public async Task ReplayAsync_ShouldPropagateUnknownCommandError() {
-        const string aof =
-            "*1\r\n" +
-            "$7\r\n" +
-            "UNKNOWN\r\n";
-
-        using var stream =
-            new MemoryStream(
-                Encoding.UTF8.GetBytes(aof));
+    public async Task ReplayAsync_WithStartOffsetAtEndOfStream_ReturnsZero() {
+        var parser =
+            new RespParser();
 
         var reader =
             new AofCommandReader(
-                new RespParser());
+                parser);
 
         var dispatcher =
             new CommandDispatcher();
 
         dispatcher.RegisterCommands(
-            []);
+            [
+                new RecordingCommand("SET")
+            ]);
+
+        dispatcher.RegisterPersistence(
+            new RecordingPersistence());
 
         var replayer =
             new AofCommandReplayer(
                 reader,
                 dispatcher);
 
-        await Assert.ThrowsAsync<CommandArgumentException>(
-            async () =>
-                await replayer.ReplayAsync(stream));
-    }
+        byte[] data =
+            Encoding.UTF8.GetBytes(
+                "*3\r\n" +
+                "$3\r\nSET\r\n" +
+                "$3\r\nkey\r\n" +
+                "$5\r\nvalue\r\n");
 
-    [Fact]
-    public async Task ReplayAsync_ShouldReturnZeroForEmptyAof() {
         using var stream =
-            new MemoryStream();
+            new MemoryStream(data);
 
-        var reader =
-            new AofCommandReader(
-                new RespParser());
-
-        var dispatcher =
-            new CommandDispatcher();
-
-        dispatcher.RegisterCommands(
-            []);
-
-        var replayer =
-            new AofCommandReplayer(
-                reader,
-                dispatcher);
-
-        int replayed =
-            await replayer.ReplayAsync(stream);
+        int replayedCommands =
+            await replayer.ReplayAsync(
+                stream,
+                stream.Length);
 
         Assert.Equal(
             0,
-            replayed);
+            replayedCommands);
     }
 
     [Fact]
-    public async Task ReplayAsync_ShouldRejectUnreadableStream() {
-        using var stream =
-            new NonReadableStream();
+    public async Task ReplayAsync_WithNegativeStartOffset_ThrowsArgumentOutOfRangeException() {
+        var parser =
+            new RespParser();
 
         var reader =
             new AofCommandReader(
-                new RespParser());
+                parser);
 
         var dispatcher =
             new CommandDispatcher();
 
         dispatcher.RegisterCommands(
-            []);
+            [
+                new RecordingCommand("SET")
+            ]);
+
+        dispatcher.RegisterPersistence(
+            new RecordingPersistence());
 
         var replayer =
             new AofCommandReplayer(
                 reader,
                 dispatcher);
 
-        await Assert.ThrowsAsync<ArgumentException>(
+        using var stream =
+            new MemoryStream();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
             async () =>
-                await replayer.ReplayAsync(stream));
+                await replayer.ReplayAsync(
+                    stream,
+                    -1));
     }
 
-    private sealed class RecordingCommand : IRedisCommand {
-        public RecordingCommand(string name) {
+    [Fact]
+    public async Task ReplayAsync_WithStartOffsetBeyondStreamLength_ThrowsArgumentOutOfRangeException() {
+        var parser =
+            new RespParser();
+
+        var reader =
+            new AofCommandReader(
+                parser);
+
+        var dispatcher =
+            new CommandDispatcher();
+
+        dispatcher.RegisterCommands(
+            [
+                new RecordingCommand("SET")
+            ]);
+
+        dispatcher.RegisterPersistence(
+            new RecordingPersistence());
+
+        var replayer =
+            new AofCommandReplayer(
+                reader,
+                dispatcher);
+
+        using var stream =
+            new MemoryStream(
+                [1, 2, 3]);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            async () =>
+                await replayer.ReplayAsync(
+                    stream,
+                    stream.Length + 1));
+    }
+
+    [Fact]
+    public async Task ReplayAsync_WithNonSeekableStream_ThrowsArgumentException() {
+        var parser =
+            new RespParser();
+
+        var reader =
+            new AofCommandReader(
+                parser);
+
+        var dispatcher =
+            new CommandDispatcher();
+
+        dispatcher.RegisterCommands(
+            [
+                new RecordingCommand("SET")
+            ]);
+
+        dispatcher.RegisterPersistence(
+            new RecordingPersistence());
+
+        var replayer =
+            new AofCommandReplayer(
+                reader,
+                dispatcher);
+
+        using var stream =
+            new NonSeekableReadStream();
+
+        ArgumentException exception =
+            await Assert.ThrowsAsync<ArgumentException>(
+                async () =>
+                    await replayer.ReplayAsync(
+                        stream,
+                        0));
+
+        Assert.Contains(
+            "seeking",
+            exception.Message,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReplayAsync_TruncatedAof_ThrowsInvalidDataException() {
+        var parser =
+            new RespParser();
+
+        var reader =
+            new AofCommandReader(
+                parser);
+
+        var dispatcher =
+            new CommandDispatcher();
+
+        dispatcher.RegisterCommands(
+            [
+                new RecordingCommand("SET")
+            ]);
+
+        dispatcher.RegisterPersistence(
+            new RecordingPersistence());
+
+        var replayer =
+            new AofCommandReplayer(
+                reader,
+                dispatcher);
+
+        byte[] data =
+            Encoding.UTF8.GetBytes(
+                "*3\r\n" +
+                "$3\r\nSET\r\n" +
+                "$3\r\nkey\r\n" +
+                "$5\r\nval");
+
+        using var stream =
+            new MemoryStream(data);
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            async () =>
+                await replayer.ReplayAsync(
+                    stream));
+    }
+
+    private sealed class RecordingPersistence :
+        ICommandPersistence {
+        public ValueTask PersistAsync(
+            string commandName,
+            IReadOnlyList<string> arguments,
+            CancellationToken cancellationToken) {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingCommand :
+        IRedisCommand {
+        public RecordingCommand(
+            string name) {
             Name = name;
         }
 
         public string Name { get; }
 
-        public int ExecutionCount { get; private set; }
-
-        public List<IReadOnlyList<string>> ExecutedArguments { get; } = [];
+        public List<string> Keys { get; } = [];
 
         public ValueTask<RespValue> ExecuteAsync(
             CommandContext context,
             IReadOnlyList<RespValue> arguments) {
-            ExecutionCount++;
-
-            var values =
-                arguments
-                    .Select(argument =>
-                        argument is RespBulkString bulkString
-                            ? bulkString.Value ?? "<null>"
-                            : argument.ToString()!)
-                    .ToArray();
-
-            ExecutedArguments.Add(values);
+            if (arguments.Count > 0 &&
+                arguments[0] is RespBulkString key &&
+                key.Value is not null) {
+                Keys.Add(
+                    key.Value);
+            }
 
             return ValueTask.FromResult<RespValue>(
                 new RespSimpleString("OK"));
         }
     }
 
-    private sealed class NonReadableStream : Stream {
-        public override bool CanRead => false;
-
-        public override bool CanSeek => false;
-
-        public override bool CanWrite => false;
-
-        public override long Length =>
-            throw new NotSupportedException();
-
-        public override long Position {
-            get => throw new NotSupportedException();
-            set => throw new NotSupportedException();
-        }
-
-        public override void Flush() {
-            throw new NotSupportedException();
-        }
-
-        public override int Read(
-            byte[] buffer,
-            int offset,
-            int count) {
-            throw new NotSupportedException();
-        }
+    private sealed class NonSeekableReadStream :
+        MemoryStream {
+        public override bool CanSeek =>
+            false;
 
         public override long Seek(
             long offset,
-            SeekOrigin origin) {
+            SeekOrigin loc) {
             throw new NotSupportedException();
         }
 
-        public override void SetLength(long value) {
-            throw new NotSupportedException();
-        }
-
-        public override void Write(
-            byte[] buffer,
-            int offset,
-            int count) {
-            throw new NotSupportedException();
+        public override long Position {
+            get => base.Position;
+            set => throw new NotSupportedException();
         }
     }
 }

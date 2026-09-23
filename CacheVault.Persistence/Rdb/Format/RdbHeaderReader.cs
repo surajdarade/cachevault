@@ -7,7 +7,8 @@ public static class RdbHeaderReader {
 
     public static RdbHeader ReadHeader(
         Stream stream) {
-        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(
+            stream);
 
         Span<byte> magicBuffer =
             stackalloc byte[MagicLength];
@@ -40,8 +41,35 @@ public static class RdbHeaderReader {
                 versionBuffer[0] |
                 (versionBuffer[1] << 8));
 
+        Span<byte> offsetBuffer =
+            stackalloc byte[sizeof(long)];
+
+        ReadExactly(
+            stream,
+            offsetBuffer);
+
+        ulong offsetValue =
+            (ulong)offsetBuffer[0] |
+            ((ulong)offsetBuffer[1] << 8) |
+            ((ulong)offsetBuffer[2] << 16) |
+            ((ulong)offsetBuffer[3] << 24) |
+            ((ulong)offsetBuffer[4] << 32) |
+            ((ulong)offsetBuffer[5] << 40) |
+            ((ulong)offsetBuffer[6] << 48) |
+            ((ulong)offsetBuffer[7] << 56);
+
+        long aofOffset =
+            unchecked(
+                (long)offsetValue);
+
+        if (aofOffset < 0) {
+            throw new FormatException(
+                "RDB AOF offset cannot be negative.");
+        }
+
         return new RdbHeader(
-            version);
+            version,
+            aofOffset);
     }
 
     private static void ReadExactly(

@@ -1,6 +1,5 @@
 ﻿using CacheVault.Persistence.Aof.Reading;
 using CacheVault.Persistence.Recovery;
-using CacheVault.Persistence.Rdb.Reading;
 using CacheVault.Server.Commands.Replay;
 using CacheVault.Server.Configuration;
 
@@ -13,8 +12,11 @@ public sealed class RecoveryCoordinator {
     public RecoveryCoordinator(
         RdbSnapshotLoader rdbSnapshotLoader,
         AofCommandReplayer aofCommandReplayer) {
-        ArgumentNullException.ThrowIfNull(rdbSnapshotLoader);
-        ArgumentNullException.ThrowIfNull(aofCommandReplayer);
+        ArgumentNullException.ThrowIfNull(
+            rdbSnapshotLoader);
+
+        ArgumentNullException.ThrowIfNull(
+            aofCommandReplayer);
 
         _rdbSnapshotLoader = rdbSnapshotLoader;
         _aofCommandReplayer = aofCommandReplayer;
@@ -24,9 +26,11 @@ public sealed class RecoveryCoordinator {
         ServerOptions options,
         DateTimeOffset now,
         CancellationToken cancellationToken = default) {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(
+            options);
 
         int rdbRecordsLoaded = 0;
+        long aofOffset = 0;
         int aofCommandsReplayed = 0;
 
         if (options.EnableRdb &&
@@ -38,10 +42,16 @@ public sealed class RecoveryCoordinator {
                     FileAccess.Read,
                     FileShare.Read);
 
-            rdbRecordsLoaded =
-                _rdbSnapshotLoader.Load(
+            RdbLoadResult rdbLoadResult =
+                _rdbSnapshotLoader.LoadWithMetadata(
                     rdbStream,
                     now);
+
+            rdbRecordsLoaded =
+                rdbLoadResult.RecordsLoaded;
+
+            aofOffset =
+                rdbLoadResult.AofOffset;
         }
 
         if (options.EnableAof &&
@@ -56,6 +66,7 @@ public sealed class RecoveryCoordinator {
             aofCommandsReplayed =
                 await _aofCommandReplayer.ReplayAsync(
                     aofStream,
+                    aofOffset,
                     cancellationToken);
         }
 

@@ -48,7 +48,7 @@ public sealed class RdbRecordWriterTests {
     }
 
     [Fact]
-    public void WriteRecord_WithMillisecondExpiration_WritesMillisecondOpcodeAndTtl() {
+    public void WriteRecord_WithMillisecondExpiration_WritesMillisecondOpcodeAndTimestamp() {
         using var stream = new MemoryStream();
 
         var writer =
@@ -85,12 +85,12 @@ public sealed class RdbRecordWriterTests {
             new BinaryReader(
                 readStream);
 
-        long ttl =
+        long expirationMilliseconds =
             binaryReader.ReadInt64();
 
         Assert.Equal(
-            2500,
-            ttl);
+            expiresAt.ToUnixTimeMilliseconds(),
+            expirationMilliseconds);
 
         Assert.Equal(
             (byte)RdbOpcode.StringValue,
@@ -110,7 +110,7 @@ public sealed class RdbRecordWriterTests {
     }
 
     [Fact]
-    public void WriteRecord_WithSecondAlignedExpiration_WritesSecondOpcodeAndTtl() {
+    public void WriteRecord_WithSecondAlignedExpiration_WritesSecondOpcodeAndTimestamp() {
         using var stream = new MemoryStream();
 
         var writer =
@@ -147,12 +147,12 @@ public sealed class RdbRecordWriterTests {
             new BinaryReader(
                 readStream);
 
-        long ttl =
+        long expirationSeconds =
             binaryReader.ReadInt64();
 
         Assert.Equal(
-            30,
-            ttl);
+            expiresAt.ToUnixTimeSeconds(),
+            expirationSeconds);
 
         Assert.Equal(
             (byte)RdbOpcode.StringValue,
@@ -445,7 +445,7 @@ public sealed class RdbRecordWriterTests {
                 readStream);
 
         Assert.Equal(
-            10,
+            secondRecord.ExpiresAt!.Value.ToUnixTimeSeconds(),
             binaryReader.ReadInt64());
 
         Assert.Equal(

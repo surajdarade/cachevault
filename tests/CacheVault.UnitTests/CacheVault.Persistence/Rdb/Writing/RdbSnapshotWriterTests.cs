@@ -201,7 +201,7 @@ public sealed class RdbSnapshotWriterTests {
     }
 
     [Fact]
-    public void Write_WithExpiration_PreservesRemainingTtl() {
+    public void Write_WithExpiration_PreservesAbsoluteExpiration() {
         DateTimeOffset now =
             CreateUtcDateTime();
 
@@ -251,7 +251,7 @@ public sealed class RdbSnapshotWriterTests {
             record.Value);
 
         Assert.Equal(
-            loadTime.AddSeconds(30),
+            now.AddSeconds(30),
             record.ExpiresAt);
 
         Assert.Equal(
@@ -260,7 +260,7 @@ public sealed class RdbSnapshotWriterTests {
     }
 
     [Fact]
-    public void Write_WithMillisecondExpiration_PreservesRemainingTtl() {
+    public void Write_WithMillisecondExpiration_PreservesAbsoluteExpiration() {
         DateTimeOffset now =
             CreateUtcDateTime();
 
@@ -302,7 +302,7 @@ public sealed class RdbSnapshotWriterTests {
                 loadTime);
 
         Assert.Equal(
-            loadTime.AddMilliseconds(2500),
+            now.AddMilliseconds(2500),
             record.ExpiresAt);
     }
 
@@ -382,6 +382,84 @@ public sealed class RdbSnapshotWriterTests {
         Assert.Equal(
             RdbHeader.CurrentVersion,
             header.Version);
+    }
+
+    [Fact]
+    public void Write_WithDefaultAofOffset_WritesZeroAofOffset() {
+        var snapshotStore =
+            new TestSnapshotStore([]);
+
+        var snapshotWriter =
+            new RdbSnapshotWriter(
+                snapshotStore);
+
+        using var stream =
+            new MemoryStream();
+
+        snapshotWriter.Write(
+            stream,
+            CreateUtcDateTime());
+
+        stream.Position = 0;
+
+        RdbHeader header =
+            RdbHeaderReader.ReadHeader(
+                stream);
+
+        Assert.Equal(
+            0,
+            header.AofOffset);
+    }
+
+    [Fact]
+    public void Write_WithAofOffset_WritesAofOffsetToHeader() {
+        const long expectedAofOffset =
+            123456789;
+
+        var snapshotStore =
+            new TestSnapshotStore([]);
+
+        var snapshotWriter =
+            new RdbSnapshotWriter(
+                snapshotStore);
+
+        using var stream =
+            new MemoryStream();
+
+        snapshotWriter.Write(
+            stream,
+            CreateUtcDateTime(),
+            expectedAofOffset);
+
+        stream.Position = 0;
+
+        RdbHeader header =
+            RdbHeaderReader.ReadHeader(
+                stream);
+
+        Assert.Equal(
+            expectedAofOffset,
+            header.AofOffset);
+    }
+
+    [Fact]
+    public void Write_WithNegativeAofOffset_ThrowsArgumentOutOfRangeException() {
+        var snapshotStore =
+            new TestSnapshotStore([]);
+
+        var snapshotWriter =
+            new RdbSnapshotWriter(
+                snapshotStore);
+
+        using var stream =
+            new MemoryStream();
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () =>
+                snapshotWriter.Write(
+                    stream,
+                    CreateUtcDateTime(),
+                    -1));
     }
 
     [Fact]

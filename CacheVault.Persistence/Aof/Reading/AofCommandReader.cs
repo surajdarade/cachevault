@@ -12,16 +12,31 @@ public sealed class AofCommandReader {
     private readonly List<byte> _buffer;
     private readonly byte[] _readBuffer;
 
-    public AofCommandReader(IRespParser parser) {
-        ArgumentNullException.ThrowIfNull(parser);
+    public AofCommandReader(
+        IRespParser parser) {
+        ArgumentNullException.ThrowIfNull(
+            parser);
 
         _parser = parser;
-        _buffer = new List<byte>(InitialBufferSize);
-        _readBuffer = new byte[ReadBufferSize];
+        _buffer = new List<byte>(
+            InitialBufferSize);
+        _readBuffer = new byte[
+            ReadBufferSize];
     }
 
-    public RespArray ReadCommand(Stream stream) {
-        ArgumentNullException.ThrowIfNull(stream);
+    /// <summary>
+    /// Reads the next complete RESP command from the AOF.
+    ///
+    /// Returns null when the stream reaches a clean EOF
+    /// without any remaining bytes.
+    ///
+    /// Throws EndOfStreamException when the stream ends
+    /// while a command is only partially available.
+    /// </summary>
+    public RespArray? ReadCommand(
+        Stream stream) {
+        ArgumentNullException.ThrowIfNull(
+            stream);
 
         if (!stream.CanRead) {
             throw new ArgumentException(
@@ -33,23 +48,32 @@ public sealed class AofCommandReader {
             if (TryParseCommand(
                     out RespArray? command,
                     out int bytesConsumed)) {
-                RemoveConsumedBytes(bytesConsumed);
+                RemoveConsumedBytes(
+                    bytesConsumed);
 
                 return command;
             }
 
-            int bytesRead = stream.Read(
-                _readBuffer,
-                0,
-                _readBuffer.Length);
+            int bytesRead =
+                stream.Read(
+                    _readBuffer,
+                    0,
+                    _readBuffer.Length);
 
             if (bytesRead == 0) {
-                throw new EndOfStreamException(
-                    "AOF command is incomplete.");
+                if (_buffer.Count == 0) {
+                    return null;
+                }
+
+                throw new InvalidDataException(
+                    "AOF contains a truncated RESP command.");
             }
 
-            for (int i = 0; i < bytesRead; i++) {
-                _buffer.Add(_readBuffer[i]);
+            for (int i = 0;
+                 i < bytesRead;
+                 i++) {
+                _buffer.Add(
+                    _readBuffer[i]);
             }
         }
     }
@@ -64,10 +88,12 @@ public sealed class AofCommandReader {
             return false;
         }
 
-        bool parsed = _parser.TryParse(
-            CollectionsMarshal.AsSpan(_buffer),
-            out RespValue? value,
-            out bytesConsumed);
+        bool parsed =
+            _parser.TryParse(
+                CollectionsMarshal.AsSpan(
+                    _buffer),
+                out RespValue? value,
+                out bytesConsumed);
 
         if (!parsed) {
             return false;
@@ -85,7 +111,8 @@ public sealed class AofCommandReader {
         return true;
     }
 
-    private void RemoveConsumedBytes(int bytesConsumed) {
+    private void RemoveConsumedBytes(
+        int bytesConsumed) {
         if (bytesConsumed <= 0 ||
             bytesConsumed > _buffer.Count) {
             throw new InvalidOperationException(

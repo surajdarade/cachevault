@@ -6,7 +6,19 @@ public sealed class RdbSnapshotReader {
     public IReadOnlyList<RdbRecord> Read(
         Stream stream,
         DateTimeOffset now) {
-        ArgumentNullException.ThrowIfNull(stream);
+        RdbSnapshotReadResult result =
+            ReadWithMetadata(
+                stream,
+                now);
+
+        return result.Records;
+    }
+
+    public RdbSnapshotReadResult ReadWithMetadata(
+        Stream stream,
+        DateTimeOffset now) {
+        ArgumentNullException.ThrowIfNull(
+            stream);
 
         if (!stream.CanRead) {
             throw new ArgumentException(
@@ -18,7 +30,8 @@ public sealed class RdbSnapshotReader {
             RdbHeaderReader.ReadHeader(
                 stream);
 
-        ValidateVersion(header);
+        ValidateVersion(
+            header);
 
         var records =
             new List<RdbRecord>();
@@ -37,7 +50,9 @@ public sealed class RdbSnapshotReader {
 
             if (opcode ==
                 RdbOpcode.EndOfFile) {
-                return records;
+                return new RdbSnapshotReadResult(
+                    header,
+                    records);
             }
 
             RdbRecord record =
@@ -46,7 +61,8 @@ public sealed class RdbSnapshotReader {
                     opcode,
                     now);
 
-            records.Add(record);
+            records.Add(
+                record);
         }
     }
 
@@ -59,16 +75,23 @@ public sealed class RdbSnapshotReader {
         if (opcode ==
             RdbOpcode.ExpireMilliseconds) {
             long milliseconds =
-                ReadInt64(stream);
+                ReadInt64(
+                    stream);
 
             if (milliseconds <= 0) {
                 throw new FormatException(
                     "RDB expiration must be greater than zero.");
             }
 
-            expiresAt =
-                now.AddMilliseconds(
-                    milliseconds);
+            try {
+                expiresAt =
+                    DateTimeOffset.FromUnixTimeMilliseconds(
+                        milliseconds);
+            }
+            catch (ArgumentOutOfRangeException) {
+                throw new FormatException(
+                    "RDB expiration timestamp is outside the supported range.");
+            }
 
             opcode =
                 ReadNextRecordOpcode(
@@ -77,16 +100,23 @@ public sealed class RdbSnapshotReader {
         else if (opcode ==
                  RdbOpcode.ExpireSeconds) {
             long seconds =
-                ReadInt64(stream);
+                ReadInt64(
+                    stream);
 
             if (seconds <= 0) {
                 throw new FormatException(
                     "RDB expiration must be greater than zero.");
             }
 
-            expiresAt =
-                now.AddSeconds(
-                    seconds);
+            try {
+                expiresAt =
+                    DateTimeOffset.FromUnixTimeSeconds(
+                        seconds);
+            }
+            catch (ArgumentOutOfRangeException) {
+                throw new FormatException(
+                    "RDB expiration timestamp is outside the supported range.");
+            }
 
             opcode =
                 ReadNextRecordOpcode(

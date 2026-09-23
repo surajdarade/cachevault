@@ -87,15 +87,15 @@ public sealed class SetCommand : IRedisCommand {
                 "ERR invalid expire time in 'set' command");
         }
 
-        if (amount <= 0) {
-            throw new CommandArgumentException(
-                "ERR invalid expire time in 'set' command");
-        }
-
         try {
             if (optionString.Value.Equals(
                     "EX",
                     StringComparison.OrdinalIgnoreCase)) {
+                if (amount <= 0) {
+                    throw new CommandArgumentException(
+                        "ERR invalid expire time in 'set' command");
+                }
+
                 return _clock.UtcNow.AddSeconds(
                     amount);
             }
@@ -103,7 +103,19 @@ public sealed class SetCommand : IRedisCommand {
             if (optionString.Value.Equals(
                     "PX",
                     StringComparison.OrdinalIgnoreCase)) {
+                if (amount <= 0) {
+                    throw new CommandArgumentException(
+                        "ERR invalid expire time in 'set' command");
+                }
+
                 return _clock.UtcNow.AddMilliseconds(
+                    amount);
+            }
+
+            if (optionString.Value.Equals(
+                    "PXAT",
+                    StringComparison.OrdinalIgnoreCase)) {
+                return DateTimeOffset.FromUnixTimeMilliseconds(
                     amount);
             }
         }

@@ -181,7 +181,7 @@ public sealed class RdbSnapshotLoaderTests {
             value.Value);
 
         Assert.Equal(
-            loadTime.AddSeconds(30),
+            snapshotTime.AddSeconds(30),
             value.ExpiresAt);
     }
 
@@ -222,7 +222,7 @@ public sealed class RdbSnapshotLoaderTests {
             value);
 
         Assert.Equal(
-            loadTime.AddMilliseconds(2500),
+            snapshotTime.AddMilliseconds(2500),
             value.ExpiresAt);
     }
 
@@ -287,7 +287,7 @@ public sealed class RdbSnapshotLoaderTests {
             seconds);
 
         Assert.Equal(
-            loadTime.AddSeconds(30),
+            snapshotTime.AddSeconds(30),
             seconds.ExpiresAt);
 
         Assert.True(
@@ -299,7 +299,7 @@ public sealed class RdbSnapshotLoaderTests {
             milliseconds);
 
         Assert.Equal(
-            loadTime.AddMilliseconds(2500),
+            snapshotTime.AddMilliseconds(2500),
             milliseconds.ExpiresAt);
     }
 
@@ -681,7 +681,7 @@ public sealed class RdbSnapshotLoaderTests {
             temporary.Value);
 
         Assert.Equal(
-            loadTime.AddSeconds(30),
+            snapshotTime.AddSeconds(30),
             temporary.ExpiresAt);
     }
 

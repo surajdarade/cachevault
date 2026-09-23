@@ -1,0 +1,240 @@
+﻿using CacheVault.Core.Storage;
+using CacheVault.Persistence.Aof.Reading;
+using CacheVault.Persistence.Aof.Writing;
+using CacheVault.Protocol.Resp.Parsing;
+using CacheVault.Protocol.Resp.Serialization;
+using CacheVault.Protocol.Resp.Types;
+using CacheVault.Server.Commands.Persistence;
+using CacheVault.UnitTests.CacheVault.Infrastructure;
+
+namespace CacheVault.UnitTests.CacheVault.Server.Commands.Persistence;
+
+public sealed class AofCommandPersistenceTests {
+    [Fact]
+    public async Task PersistAsync_SetWithExpiration_PersistsAbsoluteExpiration() {
+        string filePath =
+            CreateTemporaryFilePath();
+
+        try {
+            var clock =
+                new TestClock(
+                    new DateTimeOffset(
+                        2026,
+                        1,
+                        1,
+                        12,
+                        0,
+                        0,
+                        TimeSpan.Zero));
+
+            var store =
+                new InMemoryKeyValueStore(
+                    clock);
+
+            store.Set(
+                "key",
+                "value",
+                clock.UtcNow.AddSeconds(10));
+
+            await using var writer =
+                new AofWriter(
+                    filePath,
+                    new RespSerializer());
+
+            var persistence =
+                new AofCommandPersistence(
+                    writer,
+                    store);
+
+            await persistence.PersistAsync(
+                "SET",
+                [
+                    "key",
+                    "value",
+                    "EX",
+                    "10"
+                ],
+                CancellationToken.None);
+
+            await writer.DisposeAsync();
+
+            RespArray command =
+                ReadSingleCommand(filePath);
+
+            Assert.Equal(
+                [
+                    "SET",
+                    "key",
+                    "value",
+                    "PXAT",
+                    clock.UtcNow
+                        .AddSeconds(10)
+                        .ToUnixTimeMilliseconds()
+                        .ToString()
+                ],
+                command.Values!
+                    .Cast<RespBulkString>()
+                    .Select(value => value.Value)
+                    .ToArray());
+        }
+        finally {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public async Task PersistAsync_SetWithoutExpiration_PreservesOriginalArguments() {
+        string filePath =
+            CreateTemporaryFilePath();
+
+        try {
+            var clock =
+                new TestClock(
+                    DateTimeOffset.UtcNow);
+
+            var store =
+                new InMemoryKeyValueStore(
+                    clock);
+
+            store.Set(
+                "key",
+                "value");
+
+            await using var writer =
+                new AofWriter(
+                    filePath,
+                    new RespSerializer());
+
+            var persistence =
+                new AofCommandPersistence(
+                    writer,
+                    store);
+
+            await persistence.PersistAsync(
+                "SET",
+                [
+                    "key",
+                    "value"
+                ],
+                CancellationToken.None);
+
+            await writer.DisposeAsync();
+
+            RespArray command =
+                ReadSingleCommand(filePath);
+
+            Assert.Equal(
+                [
+                    "SET",
+                    "key",
+                    "value"
+                ],
+                command.Values!
+                    .Cast<RespBulkString>()
+                    .Select(value => value.Value)
+                    .ToArray());
+        }
+        finally {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public async Task PersistAsync_ExpiredSet_PersistsDelete() {
+        string filePath =
+            CreateTemporaryFilePath();
+
+        try {
+            var clock =
+                new TestClock(
+                    new DateTimeOffset(
+                        2026,
+                        1,
+                        1,
+                        12,
+                        0,
+                        0,
+                        TimeSpan.Zero));
+
+            var store =
+                new InMemoryKeyValueStore(
+                    clock);
+
+            store.Set(
+                "key",
+                "value",
+                clock.UtcNow.AddSeconds(1));
+
+            clock.Advance(
+                TimeSpan.FromSeconds(1));
+
+            await using var writer =
+                new AofWriter(
+                    filePath,
+                    new RespSerializer());
+
+            var persistence =
+                new AofCommandPersistence(
+                    writer,
+                    store);
+
+            await persistence.PersistAsync(
+                "SET",
+                [
+                    "key",
+                    "value",
+                    "PX",
+                    "1000"
+                ],
+                CancellationToken.None);
+
+            await writer.DisposeAsync();
+
+            RespArray command =
+                ReadSingleCommand(filePath);
+
+            Assert.Equal(
+                [
+                    "DEL",
+                    "key"
+                ],
+                command.Values!
+                    .Cast<RespBulkString>()
+                    .Select(value => value.Value)
+                    .ToArray());
+        }
+        finally {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    private static RespArray ReadSingleCommand(
+        string filePath) {
+        byte[] data =
+            File.ReadAllBytes(
+                filePath);
+
+        using var stream =
+            new MemoryStream(data);
+
+        var reader =
+            new AofCommandReader(
+                new RespParser());
+
+        return reader.ReadCommand(
+            stream);
+    }
+
+    private static string CreateTemporaryFilePath() {
+        return Path.Combine(
+            Path.GetTempPath(),
+            $"{Guid.NewGuid():N}.aof");
+    }
+
+    private static void DeleteIfExists(
+        string filePath) {
+        if (File.Exists(filePath)) {
+            File.Delete(filePath);
+        }
+    }
+}

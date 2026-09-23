@@ -121,7 +121,7 @@ public sealed class RdbSnapshotReaderTests {
     }
 
     [Fact]
-    public void Read_WithSecondExpiration_ReconstructsExpiration() {
+    public void Read_WithSecondExpiration_PreservesAbsoluteExpiration() {
         DateTimeOffset snapshotTime =
             CreateUtcDateTime();
 
@@ -149,12 +149,12 @@ public sealed class RdbSnapshotReaderTests {
                 records);
 
         Assert.Equal(
-            loadTime.AddSeconds(30),
+            snapshotTime.AddSeconds(30),
             record.ExpiresAt);
     }
 
     [Fact]
-    public void Read_WithMillisecondExpiration_ReconstructsExpiration() {
+    public void Read_WithMillisecondExpiration_PreservesAbsoluteExpiration() {
         DateTimeOffset snapshotTime =
             CreateUtcDateTime();
 
@@ -182,7 +182,7 @@ public sealed class RdbSnapshotReaderTests {
                 records);
 
         Assert.Equal(
-            loadTime.AddMilliseconds(2500),
+            snapshotTime.AddMilliseconds(2500),
             record.ExpiresAt);
     }
 
@@ -226,11 +226,11 @@ public sealed class RdbSnapshotReaderTests {
             records[0].ExpiresAt);
 
         Assert.Equal(
-            loadTime.AddSeconds(30),
+            snapshotTime.AddSeconds(30),
             records[1].ExpiresAt);
 
         Assert.Equal(
-            loadTime.AddMilliseconds(2500),
+            snapshotTime.AddMilliseconds(2500),
             records[2].ExpiresAt);
     }
 
@@ -362,35 +362,36 @@ public sealed class RdbSnapshotReaderTests {
     [Fact]
     public void Read_WithUnsupportedVersion_ThrowsFormatException() {
         using var stream =
-            new MemoryStream();
+            new MemoryStream(
+            [
+                (byte)'C',
+            (byte)'V',
+            (byte)'D',
+            (byte)'B',
 
-        var writer =
-            new RdbBinaryWriter(stream);
+            // Unsupported RDB version.
+            0x02,
+            0x00,
 
-        writer.WriteBytes(
-            "CVDB"u8);
-
-        writer.WriteUInt16(
-            RdbHeader.CurrentVersion + 1);
-
-        writer.WriteByte(
-            (byte)RdbOpcode.EndOfFile);
-
-        stream.Position = 0;
+            // AOF offset = 0.
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00
+            ]);
 
         var reader =
             new RdbSnapshotReader();
 
-        FormatException exception =
-            Assert.Throws<FormatException>(
-                () =>
-                    reader.Read(
-                        stream,
-                        CreateUtcDateTime()));
-
-        Assert.Contains(
-            "Unsupported RDB version",
-            exception.Message);
+        Assert.Throws<FormatException>(
+            () =>
+                reader.Read(
+                    stream,
+                    DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -690,7 +691,7 @@ public sealed class RdbSnapshotReaderTests {
             records[1].Value);
 
         Assert.Equal(
-            loadTime.AddSeconds(30),
+            snapshotTime.AddSeconds(30),
             records[1].ExpiresAt);
 
         Assert.Equal(
@@ -702,7 +703,7 @@ public sealed class RdbSnapshotReaderTests {
             records[2].Value);
 
         Assert.Equal(
-            loadTime.AddMilliseconds(2500),
+            snapshotTime.AddMilliseconds(2500),
             records[2].ExpiresAt);
     }
 

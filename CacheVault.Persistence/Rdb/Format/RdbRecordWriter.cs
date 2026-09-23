@@ -31,28 +31,21 @@ public static class RdbRecordWriter {
         RdbBinaryWriter writer,
         DateTimeOffset expiresAt,
         DateTimeOffset now) {
-        TimeSpan remaining =
-            expiresAt - now;
-
-        if (remaining <= TimeSpan.Zero) {
+        if (expiresAt <= now) {
             throw new ArgumentException(
                 "An expired record cannot be persisted.",
                 nameof(expiresAt));
         }
 
         long milliseconds =
-            checked(
-                (long)remaining.TotalMilliseconds);
+            expiresAt.ToUnixTimeMilliseconds();
 
         if (milliseconds % 1000 == 0) {
             writer.WriteByte(
                 (byte)RdbOpcode.ExpireSeconds);
 
-            long seconds =
-                milliseconds / 1000;
-
             writer.WriteInt64(
-                seconds);
+                expiresAt.ToUnixTimeSeconds());
 
             return;
         }

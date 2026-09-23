@@ -51,7 +51,7 @@ public sealed class RdbRecordReaderTests {
     }
 
     [Fact]
-    public void ReadRecord_WithMillisecondExpiration_ReconstructsExpiration() {
+    public void ReadRecord_WithMillisecondExpiration_PreservesAbsoluteExpiration() {
         using var stream = new MemoryStream();
 
         var writer =
@@ -97,12 +97,12 @@ public sealed class RdbRecordReaderTests {
             result.Value);
 
         Assert.Equal(
-            loadTime.AddMilliseconds(2500),
+            now.AddMilliseconds(2500),
             result.ExpiresAt);
     }
 
     [Fact]
-    public void ReadRecord_WithSecondExpiration_ReconstructsExpiration() {
+    public void ReadRecord_WithSecondExpiration_PreservesAbsoluteExpiration() {
         using var stream = new MemoryStream();
 
         var writer =
@@ -140,7 +140,7 @@ public sealed class RdbRecordReaderTests {
                 loadTime);
 
         Assert.Equal(
-            loadTime.AddSeconds(30),
+            snapshotTime.AddSeconds(30),
             result.ExpiresAt);
     }
 
@@ -603,6 +603,16 @@ public sealed class RdbRecordReaderTests {
                 0,
                 TimeSpan.Zero);
 
+        DateTimeOffset now =
+            new(
+                2026,
+                9,
+                23,
+                10,
+                0,
+                0,
+                TimeSpan.Zero);
+
         var original =
             new RdbRecord(
                 "cache:key",
@@ -627,7 +637,7 @@ public sealed class RdbRecordReaderTests {
             result.Value);
 
         Assert.Equal(
-            loadTime.AddMilliseconds(2500),
+            now.AddMilliseconds(2500),
             result.ExpiresAt);
     }
 
@@ -667,7 +677,7 @@ public sealed class RdbRecordReaderTests {
             result.Value);
 
         Assert.Equal(
-            loadTime.AddSeconds(60),
+            original.ExpiresAt,
             result.ExpiresAt);
     }
 

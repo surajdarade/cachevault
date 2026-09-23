@@ -23,7 +23,9 @@ public sealed class CacheVaultTestServer : IAsyncDisposable {
             new ServerOptions
             {
                 Host = "127.0.0.1",
-                Port = 0
+                Port = 0,
+                EnableRdb = false,
+                EnableAof = false
             };
 
         services.AddCacheVaultServer(

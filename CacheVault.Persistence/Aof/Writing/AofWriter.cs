@@ -4,35 +4,25 @@ namespace CacheVault.Persistence.Aof.Writing;
 
 public sealed class AofWriter : IAsyncDisposable {
     private readonly AofCommandWriter _commandWriter;
-    private readonly FileStream _stream;
+    private readonly string _filePath;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
+    private FileStream? _stream;
     private bool _disposed;
 
     public AofWriter(
         string filePath,
         IRespSerializer serializer) {
-        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
-        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentException.ThrowIfNullOrWhiteSpace(
+            filePath);
 
-        string? directory =
-            Path.GetDirectoryName(filePath);
+        ArgumentNullException.ThrowIfNull(
+            serializer);
 
-        if (!string.IsNullOrWhiteSpace(directory)) {
-            Directory.CreateDirectory(directory);
-        }
+        _filePath = filePath;
 
         _commandWriter =
             new AofCommandWriter(serializer);
-
-        _stream =
-            new FileStream(
-                filePath,
-                FileMode.Append,
-                FileAccess.Write,
-                FileShare.Read,
-                bufferSize: 4096,
-                options: FileOptions.Asynchronous);
     }
 
     public async ValueTask AppendCommandAsync(
@@ -52,6 +42,8 @@ public sealed class AofWriter : IAsyncDisposable {
 
         try {
             ThrowIfDisposed();
+
+            _stream ??= OpenStream();
 
             _commandWriter.WriteCommand(
                 _stream,
@@ -78,9 +70,13 @@ public sealed class AofWriter : IAsyncDisposable {
                 return;
             }
 
-            await _stream.FlushAsync();
+            if (_stream is not null) {
+                await _stream.FlushAsync();
 
-            await _stream.DisposeAsync();
+                await _stream.DisposeAsync();
+
+                _stream = null;
+            }
 
             _disposed = true;
         }
@@ -88,6 +84,25 @@ public sealed class AofWriter : IAsyncDisposable {
             _writeLock.Release();
             _writeLock.Dispose();
         }
+    }
+
+    private FileStream OpenStream() {
+        string? directory =
+            Path.GetDirectoryName(
+                _filePath);
+
+        if (!string.IsNullOrWhiteSpace(directory)) {
+            Directory.CreateDirectory(
+                directory);
+        }
+
+        return new FileStream(
+            _filePath,
+            FileMode.Append,
+            FileAccess.Write,
+            FileShare.Read,
+            bufferSize: 4096,
+            options: FileOptions.Asynchronous);
     }
 
     private void ThrowIfDisposed() {

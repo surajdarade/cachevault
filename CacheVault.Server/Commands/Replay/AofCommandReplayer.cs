@@ -13,17 +13,31 @@ public sealed class AofCommandReplayer {
     public AofCommandReplayer(
         AofCommandReader reader,
         CommandDispatcher dispatcher) {
-        ArgumentNullException.ThrowIfNull(reader);
-        ArgumentNullException.ThrowIfNull(dispatcher);
+        ArgumentNullException.ThrowIfNull(
+            reader);
+
+        ArgumentNullException.ThrowIfNull(
+            dispatcher);
 
         _reader = reader;
         _dispatcher = dispatcher;
     }
 
-    public async ValueTask<int> ReplayAsync(
+    public ValueTask<int> ReplayAsync(
         Stream stream,
         CancellationToken cancellationToken = default) {
-        ArgumentNullException.ThrowIfNull(stream);
+        return ReplayAsync(
+            stream,
+            0,
+            cancellationToken);
+    }
+
+    public async ValueTask<int> ReplayAsync(
+        Stream stream,
+        long startOffset,
+        CancellationToken cancellationToken = default) {
+        ArgumentNullException.ThrowIfNull(
+            stream);
 
         if (!stream.CanRead) {
             throw new ArgumentException(
@@ -31,24 +45,45 @@ public sealed class AofCommandReplayer {
                 nameof(stream));
         }
 
-        var session = new ClientSession();
+        if (!stream.CanSeek) {
+            throw new ArgumentException(
+                "The stream must support seeking.",
+                nameof(stream));
+        }
+
+        if (startOffset < 0) {
+            throw new ArgumentOutOfRangeException(
+                nameof(startOffset),
+                "AOF start offset cannot be negative.");
+        }
+
+        if (startOffset > stream.Length) {
+            throw new ArgumentOutOfRangeException(
+                nameof(startOffset),
+                "AOF start offset cannot be greater than the stream length.");
+        }
+
+        stream.Position = startOffset;
+
+        var session =
+            new ClientSession();
 
         var context =
             new CommandContext(
                 session,
-                cancellationToken);
+                cancellationToken,
+                isReplay: true);
 
         int replayedCommands = 0;
 
         while (true) {
             cancellationToken.ThrowIfCancellationRequested();
 
-            RespArray command;
+            RespArray? command =
+                _reader.ReadCommand(
+                    stream);
 
-            try {
-                command = _reader.ReadCommand(stream);
-            }
-            catch (EndOfStreamException) {
+            if (command is null) {
                 return replayedCommands;
             }
 

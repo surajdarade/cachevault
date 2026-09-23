@@ -106,7 +106,8 @@ public sealed class CommandDispatcher {
                 context,
                 arguments);
 
-        if (ShouldPersist(command.Name)) {
+        if (!context.IsReplay &&
+            ShouldPersist(command.Name)) {
             await PersistAsync(
                 command.Name,
                 arguments,
@@ -137,7 +138,8 @@ public sealed class CommandDispatcher {
                 context,
                 queuedCommand.Arguments);
 
-        if (ShouldPersist(command.Name)) {
+        if (!context.IsReplay &&
+            ShouldPersist(command.Name)) {
             await PersistAsync(
                 command.Name,
                 queuedCommand.Arguments,

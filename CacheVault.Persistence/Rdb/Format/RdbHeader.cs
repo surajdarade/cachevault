@@ -1,8 +1,9 @@
 ﻿namespace CacheVault.Persistence.Rdb.Format;
 
 public sealed record RdbHeader(
-    ushort Version) {
+    ushort Version,
+    long AofOffset = 0) {
     public const string Magic = "CVDB";
 
-    public const ushort CurrentVersion = 1;
+    public const ushort CurrentVersion = 3;
 }
