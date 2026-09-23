@@ -21,4 +21,7 @@ public interface IKeyValueStore {
     long Increment(
         string key,
         long amount = 1);
+
+    long GetVersion(
+        string key);
 }

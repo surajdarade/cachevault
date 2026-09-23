@@ -528,4 +528,339 @@ public sealed class ExecCommandTests {
             new RespBulkString("Suraj"),
             responses.Values[1]);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_WatchedKeyUnchanged_ExecutesTransaction() {
+        _store.Set(
+            "key",
+            "initial");
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("WATCH"),
+            new RespBulkString("key")
+            ]));
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("MULTI")
+            ]));
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("SET"),
+            new RespBulkString("key"),
+            new RespBulkString("updated")
+            ]));
+
+        RespValue result =
+            await _dispatcher.DispatchAsync(
+                _context,
+                new RespArray(
+                [
+                    new RespBulkString("EXEC")
+                ]));
+
+        var responses =
+            Assert.IsType<RespArray>(
+                result);
+
+        Assert.NotNull(
+            responses.Values);
+
+        Assert.Single(
+            responses.Values);
+
+        Assert.Equal(
+            new RespSimpleString("OK"),
+            responses.Values[0]);
+
+        Assert.True(
+            _store.TryGet(
+                "key",
+                out var value));
+
+        Assert.NotNull(
+            value);
+
+        Assert.Equal(
+            "updated",
+            value.Value);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WatchedKeyChanged_AbortsTransaction() {
+        _store.Set(
+            "key",
+            "initial");
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("WATCH"),
+            new RespBulkString("key")
+            ]));
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("MULTI")
+            ]));
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("SET"),
+            new RespBulkString("other"),
+            new RespBulkString("queued-value")
+            ]));
+
+        _store.Set(
+            "key",
+            "changed-by-other-client");
+
+        RespValue result =
+            await _dispatcher.DispatchAsync(
+                _context,
+                new RespArray(
+                [
+                    new RespBulkString("EXEC")
+                ]));
+
+        var response =
+            Assert.IsType<RespArray>(
+                result);
+
+        Assert.Null(
+            response.Values);
+
+        Assert.False(
+            _session.IsInTransaction);
+
+        Assert.Empty(
+            _session.QueuedCommands);
+
+        Assert.False(
+            _store.Contains("other"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WatchedMissingKeyCreated_AbortsTransaction() {
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("WATCH"),
+            new RespBulkString("missing")
+            ]));
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("MULTI")
+            ]));
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("SET"),
+            new RespBulkString("other"),
+            new RespBulkString("value")
+            ]));
+
+        _store.Set(
+            "missing",
+            "created");
+
+        RespValue result =
+            await _dispatcher.DispatchAsync(
+                _context,
+                new RespArray(
+                [
+                    new RespBulkString("EXEC")
+                ]));
+
+        var response =
+            Assert.IsType<RespArray>(
+                result);
+
+        Assert.Null(
+            response.Values);
+
+        Assert.False(
+            _store.Contains("other"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WatchedKeyDeleted_AbortsTransaction() {
+        _store.Set(
+            "key",
+            "value");
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("WATCH"),
+            new RespBulkString("key")
+            ]));
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("MULTI")
+            ]));
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("SET"),
+            new RespBulkString("other"),
+            new RespBulkString("value")
+            ]));
+
+        Assert.True(
+            _store.Remove("key"));
+
+        RespValue result =
+            await _dispatcher.DispatchAsync(
+                _context,
+                new RespArray(
+                [
+                    new RespBulkString("EXEC")
+                ]));
+
+        var response =
+            Assert.IsType<RespArray>(
+                result);
+
+        Assert.Null(
+            response.Values);
+
+        Assert.False(
+            _store.Contains("other"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WatchedKeyIncremented_AbortsTransaction() {
+        _store.Set(
+            "counter",
+            "10");
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("WATCH"),
+            new RespBulkString("counter")
+            ]));
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("MULTI")
+            ]));
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("SET"),
+            new RespBulkString("other"),
+            new RespBulkString("value")
+            ]));
+
+        _store.Increment(
+            "counter");
+
+        RespValue result =
+            await _dispatcher.DispatchAsync(
+                _context,
+                new RespArray(
+                [
+                    new RespBulkString("EXEC")
+                ]));
+
+        var response =
+            Assert.IsType<RespArray>(
+                result);
+
+        Assert.Null(
+            response.Values);
+
+        Assert.False(
+            _store.Contains("other"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenAnyWatchedKeyChanges_AbortsTransaction() {
+        _store.Set(
+            "first",
+            "value1");
+
+        _store.Set(
+            "second",
+            "value2");
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("WATCH"),
+            new RespBulkString("first"),
+            new RespBulkString("second")
+            ]));
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("MULTI")
+            ]));
+
+        await _dispatcher.DispatchAsync(
+            _context,
+            new RespArray(
+            [
+                new RespBulkString("SET"),
+            new RespBulkString("other"),
+            new RespBulkString("value")
+            ]));
+
+        _store.Set(
+            "second",
+            "changed");
+
+        RespValue result =
+            await _dispatcher.DispatchAsync(
+                _context,
+                new RespArray(
+                [
+                    new RespBulkString("EXEC")
+                ]));
+
+        var response =
+            Assert.IsType<RespArray>(
+                result);
+
+        Assert.Null(
+            response.Values);
+
+        Assert.False(
+            _store.Contains("other"));
+    }
 }

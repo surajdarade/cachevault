@@ -170,4 +170,62 @@ public sealed class ClientSessionTests {
         Assert.Throws<InvalidOperationException>(
             session.DiscardTransaction);
     }
+
+    [Fact]
+    public void NewSession_HasEmptyWatchState() {
+        var session =
+            new ClientSession();
+
+        Assert.False(
+            session.WatchState.HasWatchedKeys);
+
+        Assert.Empty(
+            session.WatchState.WatchedKeys);
+    }
+
+    [Fact]
+    public void WatchState_BelongsToSession() {
+        var session =
+            new ClientSession();
+
+        session.WatchState.Watch(
+            "key",
+            10);
+
+        Assert.True(
+            session.WatchState.HasWatchedKeys);
+
+        Assert.Equal(
+            10,
+            session.WatchState.WatchedKeys["key"]);
+    }
+
+    [Fact]
+    public void DiscardTransaction_DoesNotClearWatchState() {
+        var session =
+            new ClientSession();
+
+        session.WatchState.Watch(
+            "key",
+            10);
+
+        session.BeginTransaction();
+
+        session.QueueCommand(
+            new QueuedCommand(
+                "SET",
+                []));
+
+        session.DiscardTransaction();
+
+        Assert.False(
+            session.IsInTransaction);
+
+        Assert.True(
+            session.WatchState.HasWatchedKeys);
+
+        Assert.Equal(
+            10,
+            session.WatchState.WatchedKeys["key"]);
+    }
 }

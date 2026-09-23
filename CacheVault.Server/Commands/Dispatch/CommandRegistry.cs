@@ -9,14 +9,9 @@ public static class CommandRegistry {
         IKeyValueStore store,
         IClock clock,
         CommandDispatcher dispatcher) {
-        ArgumentNullException.ThrowIfNull(
-            store);
-
-        ArgumentNullException.ThrowIfNull(
-            clock);
-
-        ArgumentNullException.ThrowIfNull(
-            dispatcher);
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(dispatcher);
 
         return
         [
@@ -29,7 +24,9 @@ public static class CommandRegistry {
             new TtlCommand(store, clock),
             new PttlCommand(store, clock),
             new MultiCommand(),
-            new ExecCommand(dispatcher),
+            new ExecCommand(dispatcher, store),
+            new WatchCommand(store),
+            new UnwatchCommand(),
             new DiscardCommand()
         ];
     }

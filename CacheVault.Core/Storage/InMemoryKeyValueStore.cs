@@ -8,6 +8,9 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
     private readonly ConcurrentDictionary<string, StoredValue> _values =
         new();
 
+    private readonly ConcurrentDictionary<string, long> _keyVersions =
+        new();
+
     private readonly IClock _clock;
 
     private long _version;
@@ -36,10 +39,17 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
         }
 
         if (IsExpired(storedValue)) {
-            _values.TryRemove(
-                new KeyValuePair<string, StoredValue>(
-                    key,
-                    storedValue));
+            if (_values.TryRemove(
+                    new KeyValuePair<string, StoredValue>(
+                        key,
+                        storedValue))) {
+                long version =
+                    Interlocked.Increment(
+                        ref _version);
+
+                _keyVersions[key] =
+                    version;
+            }
 
             value = null;
 
@@ -76,6 +86,9 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
 
         _values[key] =
             storedValue;
+
+        _keyVersions[key] =
+            version;
     }
 
     public bool Remove(
@@ -83,9 +96,20 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
         ArgumentException.ThrowIfNullOrWhiteSpace(
             key);
 
-        return _values.TryRemove(
-            key,
-            out _);
+        if (!_values.TryRemove(
+                key,
+                out _)) {
+            return false;
+        }
+
+        long version =
+            Interlocked.Increment(
+                ref _version);
+
+        _keyVersions[key] =
+            version;
+
+        return true;
     }
 
     public bool Contains(
@@ -96,8 +120,8 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
     }
 
     public long Increment(
-        string key,
-        long amount = 1) {
+    string key,
+    long amount = 1) {
         ArgumentException.ThrowIfNullOrWhiteSpace(
             key);
 
@@ -131,6 +155,9 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
                 if (_values.TryAdd(
                         key,
                         newStoredValue)) {
+                    _keyVersions[key] =
+                        version;
+
                     return initialValue;
                 }
 
@@ -138,10 +165,17 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
             }
 
             if (IsExpired(current)) {
-                _values.TryRemove(
-                    new KeyValuePair<string, StoredValue>(
-                        key,
-                        current));
+                if (_values.TryRemove(
+                        new KeyValuePair<string, StoredValue>(
+                            key,
+                            current))) {
+                    long expirationVersion =
+                        Interlocked.Increment(
+                            ref _version);
+
+                    _keyVersions[key] =
+                        expirationVersion;
+                }
 
                 continue;
             }
@@ -166,22 +200,45 @@ public sealed class InMemoryKeyValueStore : IKeyValueStore {
                     exception);
             }
 
+            long updatedVersion =
+                Interlocked.Increment(
+                    ref _version);
+
             var updatedStoredValue =
                 new StoredValue(
                     updatedValue.ToString())
                 {
-                    Version =
-                        Interlocked.Increment(
-                            ref _version)
+                    Version = updatedVersion
                 };
 
             if (_values.TryUpdate(
                     key,
                     updatedStoredValue,
                     current)) {
+                _keyVersions[key] =
+                    updatedVersion;
+
                 return updatedValue;
             }
         }
+    }
+
+    public long GetVersion(
+        string key) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(
+            key);
+
+        // Force lazy expiration to be processed before
+        // returning the current version.
+        TryGet(
+            key,
+            out _);
+
+        return _keyVersions.TryGetValue(
+            key,
+            out long version)
+                ? version
+                : 0;
     }
 
     private bool IsExpired(

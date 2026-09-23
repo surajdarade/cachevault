@@ -10,7 +10,9 @@ public sealed class CommandDispatcher {
         {
             "MULTI",
             "EXEC",
-            "DISCARD"
+            "DISCARD",
+            "WATCH",
+            "UNWATCH"
         };
 
     private IReadOnlyDictionary<string, IRedisCommand> _commands =
@@ -36,11 +38,8 @@ public sealed class CommandDispatcher {
     public ValueTask<RespValue> DispatchAsync(
         CommandContext context,
         RespArray request) {
-        ArgumentNullException.ThrowIfNull(
-            context);
-
-        ArgumentNullException.ThrowIfNull(
-            request);
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(request);
 
         if (request.Values is null ||
             request.Values.Count == 0) {
@@ -67,8 +66,7 @@ public sealed class CommandDispatcher {
                 : request.Values.Skip(1).ToArray();
 
         if (context.Session.IsInTransaction &&
-            !TransactionControlCommands.Contains(
-                command.Name)) {
+            !TransactionControlCommands.Contains(command.Name)) {
             context.Session.QueueCommand(
                 new QueuedCommand(
                     command.Name,
@@ -86,11 +84,8 @@ public sealed class CommandDispatcher {
     public ValueTask<RespValue> ExecuteQueuedCommandAsync(
         CommandContext context,
         QueuedCommand queuedCommand) {
-        ArgumentNullException.ThrowIfNull(
-            context);
-
-        ArgumentNullException.ThrowIfNull(
-            queuedCommand);
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(queuedCommand);
 
         if (!_commands.TryGetValue(
                 queuedCommand.Name,

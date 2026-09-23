@@ -393,4 +393,134 @@ public sealed class InMemoryKeyValueStoreTests {
             storedValue.Value);
         Assert.Null(storedValue.ExpiresAt);
     }
+
+    [Fact]
+    public void GetVersion_NeverExistingKey_ReturnsZero() {
+        long version =
+            _store.GetVersion("missing");
+
+        Assert.Equal(
+            0,
+            version);
+    }
+
+    [Fact]
+    public void GetVersion_AfterSet_ReturnsCurrentVersion() {
+        _store.Set(
+            "key",
+            "value");
+
+        long version =
+            _store.GetVersion("key");
+
+        Assert.True(
+            version > 0);
+    }
+
+    [Fact]
+    public void GetVersion_AfterSetChanges_WhenKeyIsUpdated() {
+        _store.Set(
+            "key",
+            "value1");
+
+        long firstVersion =
+            _store.GetVersion("key");
+
+        _store.Set(
+            "key",
+            "value2");
+
+        long secondVersion =
+            _store.GetVersion("key");
+
+        Assert.True(
+            secondVersion > firstVersion);
+    }
+
+    [Fact]
+    public void GetVersion_AfterRemoveChanges() {
+        _store.Set(
+            "key",
+            "value");
+
+        long setVersion =
+            _store.GetVersion("key");
+
+        bool removed =
+            _store.Remove("key");
+
+        Assert.True(
+            removed);
+
+        long removeVersion =
+            _store.GetVersion("key");
+
+        Assert.True(
+            removeVersion > setVersion);
+    }
+
+    [Fact]
+    public void GetVersion_AfterSetOnPreviouslyMissingKey_Changes() {
+        long initialVersion =
+            _store.GetVersion("key");
+
+        _store.Set(
+            "key",
+            "value");
+
+        long updatedVersion =
+            _store.GetVersion("key");
+
+        Assert.Equal(
+            0,
+            initialVersion);
+
+        Assert.True(
+            updatedVersion > initialVersion);
+    }
+
+    [Fact]
+    public void GetVersion_AfterIncrementChanges() {
+        _store.Set(
+            "counter",
+            "10");
+
+        long firstVersion =
+            _store.GetVersion("counter");
+
+        _store.Increment(
+            "counter");
+
+        long secondVersion =
+            _store.GetVersion("counter");
+
+        Assert.True(
+            secondVersion > firstVersion);
+    }
+
+    [Fact]
+    public void GetVersion_AfterExpirationChanges() {
+        DateTimeOffset expiration =
+            _clock.UtcNow.AddSeconds(10);
+
+        _store.Set(
+            "key",
+            "value",
+            expiration);
+
+        long initialVersion =
+            _store.GetVersion("key");
+
+        _clock.Advance(
+            TimeSpan.FromSeconds(10));
+
+        long expiredVersion =
+            _store.GetVersion("key");
+
+        Assert.True(
+            expiredVersion > initialVersion);
+
+        Assert.False(
+            _store.Contains("key"));
+    }
 }

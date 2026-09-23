@@ -1,4 +1,5 @@
-﻿using CacheVault.Protocol.Resp.Types;
+﻿using CacheVault.Core.Abstractions;
+using CacheVault.Protocol.Resp.Types;
 using CacheVault.Server.Commands.Abstractions;
 using CacheVault.Server.Commands.Dispatch;
 using CacheVault.Server.Networking.Connections;
@@ -7,16 +8,26 @@ namespace CacheVault.Server.Commands.Implementations;
 
 public sealed class ExecCommand : IRedisCommand {
     private readonly CommandDispatcher _dispatcher;
+    private readonly IKeyValueStore _store;
 
     public ExecCommand(
-        CommandDispatcher dispatcher) {
+        CommandDispatcher dispatcher,
+        IKeyValueStore store) {
         ArgumentNullException.ThrowIfNull(
             dispatcher);
 
-        _dispatcher = dispatcher;
+        ArgumentNullException.ThrowIfNull(
+            store);
+
+        _dispatcher =
+            dispatcher;
+
+        _store =
+            store;
     }
 
-    public string Name => "EXEC";
+    public string Name =>
+        "EXEC";
 
     public async ValueTask<RespValue> ExecuteAsync(
         CommandContext context,
@@ -35,6 +46,15 @@ public sealed class ExecCommand : IRedisCommand {
         if (!context.Session.IsInTransaction) {
             throw new CommandArgumentException(
                 "ERR EXEC without MULTI");
+        }
+
+        if (context.Session.WatchState.HasChanged(
+                _store.GetVersion)) {
+            context.Session.DrainTransaction();
+            context.Session.WatchState.Clear();
+
+            return new RespArray(
+                null);
         }
 
         IReadOnlyList<QueuedCommand> queuedCommands =
@@ -60,6 +80,8 @@ public sealed class ExecCommand : IRedisCommand {
                         exception.Message));
             }
         }
+
+        context.Session.WatchState.Clear();
 
         return new RespArray(
             responses);
