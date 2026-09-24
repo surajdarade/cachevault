@@ -6,11 +6,12 @@ using CacheVault.Server.Commands.Implementations;
 namespace CacheVault.Server.Commands.Dispatch;
 
 public static class CommandRegistry {
-    public static IReadOnlyList<IRedisCommand> CreateDefaultCommands(
-        IKeyValueStore store,
-        IClock clock,
-        CommandDispatcher dispatcher,
-        IReplicationWaiter replicationWaiter) {
+    public static IReadOnlyList<IRedisCommand>
+        CreateDefaultCommands(
+            IKeyValueStore store,
+            IClock clock,
+            CommandDispatcher dispatcher,
+            IReplicationWaiter replicationWaiter) {
         ArgumentNullException.ThrowIfNull(
             store);
 
