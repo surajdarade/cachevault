@@ -6,6 +6,7 @@ using CacheVault.Server.Commands.Abstractions;
 using CacheVault.Server.Commands.Dispatch;
 using CacheVault.Server.Networking.Connections;
 using CacheVault.UnitTests.CacheVault.Infrastructure;
+using CacheVault.UnitTests.CacheVault.Replication;
 
 namespace CacheVault.UnitTests.CacheVault.Server.Commands.Dispatch;
 
@@ -26,11 +27,15 @@ public sealed class WatchTransactionIntegrationTests {
         _dispatcher =
             new CommandDispatcher();
 
+        var replicationWaiter =
+            new TestReplicationWaiter();
+
         _dispatcher.RegisterCommands(
             CommandRegistry.CreateDefaultCommands(
                 _store,
                 _clock,
-                _dispatcher));
+                _dispatcher,
+                replicationWaiter));
     }
 
     [Fact]

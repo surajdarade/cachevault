@@ -4,6 +4,8 @@ using CacheVault.Server.Commands.Abstractions;
 using CacheVault.Server.Commands.Dispatch;
 using CacheVault.Server.Networking.Connections;
 using CacheVault.UnitTests.CacheVault.Infrastructure;
+using CacheVault.Replication.Abstractions;
+using CacheVault.UnitTests.CacheVault.Replication;
 
 namespace CacheVault.UnitTests.CacheVault.Server.Commands.Dispatch;
 
@@ -21,11 +23,15 @@ public sealed class CommandDispatcherTests {
         _dispatcher =
             new CommandDispatcher();
 
+        var replicationWaiter =
+            new TestReplicationWaiter();
+
         _dispatcher.RegisterCommands(
             CommandRegistry.CreateDefaultCommands(
                 store,
                 _clock,
-                _dispatcher));
+                _dispatcher,
+                replicationWaiter));
     }
 
     private static CommandContext CreateContext() {

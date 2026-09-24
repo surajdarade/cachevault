@@ -11,17 +11,28 @@ namespace CacheVault.Server.Networking.Connections;
 
 public sealed class ReplicaConnectionHandler {
     private readonly IReplicationState _replicationState;
+
     private readonly IReplicationBacklog _replicationBacklog;
-    private readonly IReplicationSnapshotProvider _snapshotProvider;
-    private readonly IReplicationProtocolParser _protocolParser;
-    private readonly IReplicaConnectionRegistry _connectionRegistry;
+
+    private readonly IReplicationSnapshotProvider
+        _snapshotProvider;
+
+    private readonly IReplicationProtocolParser
+        _protocolParser;
+
+    private readonly IReplicaConnectionRegistry
+        _connectionRegistry;
+
+    private readonly IReplicaRegistry
+        _replicaRegistry;
 
     public ReplicaConnectionHandler(
         IReplicationState replicationState,
         IReplicationBacklog replicationBacklog,
         IReplicationSnapshotProvider snapshotProvider,
         IReplicationProtocolParser protocolParser,
-        IReplicaConnectionRegistry connectionRegistry) {
+        IReplicaConnectionRegistry connectionRegistry,
+        IReplicaRegistry replicaRegistry) {
         ArgumentNullException.ThrowIfNull(
             replicationState);
 
@@ -37,6 +48,9 @@ public sealed class ReplicaConnectionHandler {
         ArgumentNullException.ThrowIfNull(
             connectionRegistry);
 
+        ArgumentNullException.ThrowIfNull(
+            replicaRegistry);
+
         _replicationState =
             replicationState;
 
@@ -51,6 +65,9 @@ public sealed class ReplicaConnectionHandler {
 
         _connectionRegistry =
             connectionRegistry;
+
+        _replicaRegistry =
+            replicaRegistry;
     }
 
     public async Task HandleAsync(
@@ -58,9 +75,14 @@ public sealed class ReplicaConnectionHandler {
         IRespStreamReader reader,
         RespValue initialMessage,
         CancellationToken cancellationToken) {
-        ArgumentNullException.ThrowIfNull(client);
-        ArgumentNullException.ThrowIfNull(reader);
-        ArgumentNullException.ThrowIfNull(initialMessage);
+        ArgumentNullException.ThrowIfNull(
+            client);
+
+        ArgumentNullException.ThrowIfNull(
+            reader);
+
+        ArgumentNullException.ThrowIfNull(
+            initialMessage);
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -71,7 +93,8 @@ public sealed class ReplicaConnectionHandler {
             lifetime.Stream;
 
         var transport =
-            new TcpReplicationTransport(stream);
+            new TcpReplicationTransport(
+                stream);
 
         var replica =
             new ReplicaInfo(
@@ -83,6 +106,9 @@ public sealed class ReplicaConnectionHandler {
                 transport);
 
         connection.MarkConnected();
+
+        _connectionRegistry.Register(
+            connection);
 
         var psyncDecisionService =
             new PsyncDecisionService(
@@ -112,13 +138,13 @@ public sealed class ReplicaConnectionHandler {
                 handshake,
                 fullResynchronizationCoordinator,
                 partialResynchronizationCoordinator,
-                _protocolParser);
+                _protocolParser,
+                _replicaRegistry);
 
         try {
             session.Start();
 
-            await ProcessMessageAsync(
-                session,
+            await session.ProcessAsync(
                 initialMessage,
                 cancellationToken);
 
@@ -132,8 +158,7 @@ public sealed class ReplicaConnectionHandler {
                     return;
                 }
 
-                await ProcessMessageAsync(
-                    session,
+                await session.ProcessAsync(
                     message,
                     cancellationToken);
             }
@@ -147,21 +172,10 @@ public sealed class ReplicaConnectionHandler {
             _connectionRegistry.Remove(
                 replica.ReplicaId);
 
+            _replicaRegistry.Remove(
+                replica.ReplicaId);
+
             await connection.DisposeAsync();
-        }
-    }
-
-    private static async ValueTask ProcessMessageAsync(
-        ReplicaReplicationSession session,
-        RespValue message,
-        CancellationToken cancellationToken) {
-        await session.ProcessAsync(
-            message,
-            cancellationToken);
-
-        if (session.State ==
-            ReplicationHandshakeState.Completed) {
-            return;
         }
     }
 
@@ -174,7 +188,8 @@ public sealed class ReplicaConnectionHandler {
             ArgumentNullException.ThrowIfNull(
                 client);
 
-            _client = client;
+            _client =
+                client;
 
             Stream =
                 client.GetStream();

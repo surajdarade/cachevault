@@ -1,4 +1,5 @@
 ﻿using CacheVault.Core.Abstractions;
+using CacheVault.Replication.Abstractions;
 using CacheVault.Server.Commands.Abstractions;
 using CacheVault.Server.Commands.Implementations;
 
@@ -8,10 +9,19 @@ public static class CommandRegistry {
     public static IReadOnlyList<IRedisCommand> CreateDefaultCommands(
         IKeyValueStore store,
         IClock clock,
-        CommandDispatcher dispatcher) {
-        ArgumentNullException.ThrowIfNull(store);
-        ArgumentNullException.ThrowIfNull(clock);
-        ArgumentNullException.ThrowIfNull(dispatcher);
+        CommandDispatcher dispatcher,
+        IReplicationWaiter replicationWaiter) {
+        ArgumentNullException.ThrowIfNull(
+            store);
+
+        ArgumentNullException.ThrowIfNull(
+            clock);
+
+        ArgumentNullException.ThrowIfNull(
+            dispatcher);
+
+        ArgumentNullException.ThrowIfNull(
+            replicationWaiter);
 
         return
         [
@@ -27,7 +37,8 @@ public static class CommandRegistry {
             new ExecCommand(dispatcher, store),
             new WatchCommand(store),
             new UnwatchCommand(),
-            new DiscardCommand()
+            new DiscardCommand(),
+            new WaitCommand(replicationWaiter)
         ];
     }
 }

@@ -3,8 +3,8 @@ using CacheVault.Core.Storage;
 using CacheVault.Infrastructure.Time;
 using CacheVault.Persistence.Aof.Reading;
 using CacheVault.Persistence.Aof.Writing;
-using CacheVault.Persistence.Recovery;
 using CacheVault.Persistence.Rdb.Reading;
+using CacheVault.Persistence.Recovery;
 using CacheVault.Protocol.Resp.Abstractions;
 using CacheVault.Protocol.Resp.Parsing;
 using CacheVault.Protocol.Resp.Serialization;
@@ -20,6 +20,7 @@ using CacheVault.Server.Networking.Abstractions;
 using CacheVault.Server.Networking.Connections;
 using CacheVault.Server.Networking.Server;
 using CacheVault.Server.Recovery;
+using CacheVault.Server.Replication;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CacheVault.Server.Configuration;
@@ -31,14 +32,10 @@ public static class ServerServiceCollectionExtensions {
     public static IServiceCollection AddCacheVaultServer(
         this IServiceCollection services,
         ServerOptions options) {
-        ArgumentNullException.ThrowIfNull(
-            services);
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(options);
 
-        ArgumentNullException.ThrowIfNull(
-            options);
-
-        services.AddSingleton(
-            options);
+        services.AddSingleton(options);
 
         services.AddSingleton<
             IClock,
@@ -71,13 +68,13 @@ public static class ServerServiceCollectionExtensions {
                 serviceProvider.GetRequiredService<
                     InMemoryKeyValueStore>());
 
+        // -----------------------------------------------------------------
+        // Replication state
+        // -----------------------------------------------------------------
+
         services.AddSingleton<
             IReplicationState,
             ReplicationState>();
-
-        services.AddSingleton<
-            IReplicationCommandEncoder,
-            RespReplicationCommandEncoder>();
 
         services.AddSingleton<
             IReplicationBacklog>(
@@ -85,8 +82,32 @@ public static class ServerServiceCollectionExtensions {
                 ReplicationBacklogCapacity));
 
         services.AddSingleton<
+            IReplicaRegistry,
+            ReplicaRegistry>();
+
+        services.AddSingleton<
             IReplicaConnectionRegistry,
             ReplicaConnectionRegistry>();
+
+        // -----------------------------------------------------------------
+        // Replication command encoding / protocol
+        // -----------------------------------------------------------------
+
+        services.AddSingleton<
+            IReplicationCommandEncoder,
+            RespReplicationCommandEncoder>();
+
+        services.AddSingleton<
+            IReplicationProtocolEncoder,
+            RespReplicationProtocolEncoder>();
+
+        services.AddSingleton<
+            IReplicationProtocolParser,
+            RespReplicationProtocolParser>();
+
+        // -----------------------------------------------------------------
+        // Replication propagation
+        // -----------------------------------------------------------------
 
         services.AddSingleton<
             IReplicationBroadcaster,
@@ -96,13 +117,25 @@ public static class ServerServiceCollectionExtensions {
             IReplicationManager,
             ReplicationManager>();
 
-        services.AddSingleton<
-            IReplicationProtocolParser,
-            RespReplicationProtocolParser>();
+        // -----------------------------------------------------------------
+        // RDB snapshot provider used by FULLRESYNC
+        // -----------------------------------------------------------------
 
         services.AddSingleton<
             IReplicationSnapshotProvider,
             RdbReplicationSnapshotProvider>();
+
+        // -----------------------------------------------------------------
+        // WAIT
+        // -----------------------------------------------------------------
+
+        services.AddSingleton<
+            IReplicationWaiter,
+            ReplicationWaiter>();
+
+        // -----------------------------------------------------------------
+        // AOF persistence
+        // -----------------------------------------------------------------
 
         if (options.EnableAof) {
             services.AddSingleton<
@@ -141,6 +174,10 @@ public static class ServerServiceCollectionExtensions {
                 NoOpCommandPersistence>();
         }
 
+        // -----------------------------------------------------------------
+        // Command dispatcher
+        // -----------------------------------------------------------------
+
         services.AddSingleton(
             serviceProvider =>
             {
@@ -160,6 +197,10 @@ public static class ServerServiceCollectionExtensions {
                     serviceProvider.GetRequiredService<
                         IReplicationManager>();
 
+                IReplicationWaiter replicationWaiter =
+                    serviceProvider.GetRequiredService<
+                        IReplicationWaiter>();
+
                 var dispatcher =
                     new CommandDispatcher();
 
@@ -167,7 +208,8 @@ public static class ServerServiceCollectionExtensions {
                     CommandRegistry.CreateDefaultCommands(
                         store,
                         clock,
-                        dispatcher);
+                        dispatcher,
+                        replicationWaiter);
 
                 dispatcher.RegisterCommands(
                     commands);
@@ -180,6 +222,10 @@ public static class ServerServiceCollectionExtensions {
 
                 return dispatcher;
             });
+
+        // -----------------------------------------------------------------
+        // RDB persistence / recovery
+        // -----------------------------------------------------------------
 
         services.AddSingleton<
             RdbSnapshotReader>();
@@ -199,6 +245,10 @@ public static class ServerServiceCollectionExtensions {
                     store,
                     reader);
             });
+
+        // -----------------------------------------------------------------
+        // AOF recovery
+        // -----------------------------------------------------------------
 
         services.AddSingleton<
             AofCommandReader>();
@@ -222,6 +272,10 @@ public static class ServerServiceCollectionExtensions {
         services.AddSingleton<
             RecoveryCoordinator>();
 
+        // -----------------------------------------------------------------
+        // Networking
+        // -----------------------------------------------------------------
+
         services.AddSingleton<
             IClientConnectionHandler,
             ClientConnectionHandler>();
@@ -236,6 +290,13 @@ public static class ServerServiceCollectionExtensions {
         services.AddSingleton<
             IRedisTcpServer,
             RedisTcpServer>();
+
+        // -----------------------------------------------------------------
+        // Replica-side synchronization
+        // -----------------------------------------------------------------
+
+        services.AddSingleton<
+            ReplicaSynchronizationService>();
 
         return services;
     }

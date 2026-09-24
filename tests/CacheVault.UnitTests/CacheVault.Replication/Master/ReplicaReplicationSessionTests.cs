@@ -227,13 +227,17 @@ public sealed class ReplicaReplicationSessionTests {
         var parser =
             new RespReplicationProtocolParser();
 
+        var replicaRegistry =
+            new ReplicaRegistry();
+
         var session =
             new ReplicaReplicationSession(
                 connection,
                 handshake,
                 coordinator,
                 partialCoordinator,
-                parser);
+                parser,
+                replicaRegistry);
 
         return new TestFixture(
             session,
@@ -299,13 +303,17 @@ public sealed class ReplicaReplicationSessionTests {
         var parser =
             new RespReplicationProtocolParser();
 
+        var replicaRegistry =
+            new ReplicaRegistry();
+
         var session =
             new ReplicaReplicationSession(
                 connection,
                 handshake,
                 fullCoordinator,
                 partialCoordinator,
-                parser);
+                parser,
+                replicaRegistry);
 
         return new TestFixture(
             session,

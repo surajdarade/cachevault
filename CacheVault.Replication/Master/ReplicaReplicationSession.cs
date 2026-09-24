@@ -1,5 +1,4 @@
-﻿using System.Text;
-using CacheVault.Protocol.Resp.Types;
+﻿using CacheVault.Protocol.Resp.Types;
 using CacheVault.Replication.Abstractions;
 using CacheVault.Replication.Protocol;
 using CacheVault.Replication.State;
@@ -8,12 +7,18 @@ namespace CacheVault.Replication.Master;
 
 public sealed class ReplicaReplicationSession {
     private readonly ReplicaConnection _connection;
+
     private readonly ReplicationHandshake _handshake;
+
     private readonly FullResynchronizationCoordinator
         _fullResynchronizationCoordinator;
+
     private readonly PartialResynchronizationCoordinator
         _partialResynchronizationCoordinator;
+
     private readonly IReplicationProtocolParser _parser;
+
+    private readonly IReplicaRegistry _replicaRegistry;
 
     public ReplicaReplicationSession(
         ReplicaConnection connection,
@@ -22,7 +27,8 @@ public sealed class ReplicaReplicationSession {
             fullResynchronizationCoordinator,
         PartialResynchronizationCoordinator
             partialResynchronizationCoordinator,
-        IReplicationProtocolParser parser) {
+        IReplicationProtocolParser parser,
+        IReplicaRegistry replicaRegistry) {
         ArgumentNullException.ThrowIfNull(
             connection);
 
@@ -38,6 +44,9 @@ public sealed class ReplicaReplicationSession {
         ArgumentNullException.ThrowIfNull(
             parser);
 
+        ArgumentNullException.ThrowIfNull(
+            replicaRegistry);
+
         _connection =
             connection;
 
@@ -52,6 +61,9 @@ public sealed class ReplicaReplicationSession {
 
         _parser =
             parser;
+
+        _replicaRegistry =
+            replicaRegistry;
     }
 
     public ReplicationHandshakeState State =>
@@ -59,6 +71,9 @@ public sealed class ReplicaReplicationSession {
 
     public void Start() {
         _handshake.Start();
+
+        _replicaRegistry.Register(
+            _connection.Replica);
     }
 
     public async ValueTask ProcessAsync(
@@ -83,12 +98,14 @@ public sealed class ReplicaReplicationSession {
                 await ProcessReplConfAsync(
                     message,
                     cancellationToken);
+
                 return;
 
             case "PSYNC":
                 await ProcessPsyncAsync(
                     message,
                     cancellationToken);
+
                 return;
 
             default:
@@ -104,13 +121,43 @@ public sealed class ReplicaReplicationSession {
             _parser.ParseReplConf(
                 message);
 
-        _handshake.ProcessReplConf(
-            command);
+        switch (command.SubCommand.ToUpperInvariant()) {
+            case "ACK":
+                ProcessAcknowledgement(
+                    message);
 
-        await _connection.WriteAsync(
-            Encoding.UTF8.GetBytes(
-                "+OK\r\n"),
-            cancellationToken);
+                return;
+
+            case "GETACK":
+                throw new FormatException(
+                    "REPLCONF GETACK must be sent by the master.");
+
+            default:
+                _handshake.ProcessReplConf(
+                    command);
+
+                await _connection.WriteAsync(
+                    "+OK\r\n"u8.ToArray(),
+                    cancellationToken);
+
+                return;
+        }
+    }
+
+    private void ProcessAcknowledgement(
+        RespValue message) {
+        if (_handshake.State !=
+            ReplicationHandshakeState.Completed) {
+            throw new InvalidOperationException(
+                "Replication ACK cannot be processed before synchronization completes.");
+        }
+
+        ReplicationAck acknowledgement =
+            _parser.ParseAck(
+                message);
+
+        _connection.Replica.Acknowledge(
+            acknowledgement.Offset);
     }
 
     private async ValueTask ProcessPsyncAsync(
