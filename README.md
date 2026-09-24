@@ -1,150 +1,603 @@
 # CacheVault
 
-**CacheVault** is a Redis-compatible distributed persistent in-memory data store implemented completely from scratch in **C# / .NET 8**.
+Redis-compatible in-memory data store implemented in **C# / .NET** with TCP networking, RESP protocol support, transactions, optimistic concurrency, replication, persistence, eviction, Pub/Sub, lists, automated testing, and performance benchmarking.
 
-It uses the attached Java implementation as the behavioral and architectural reference, but is an independent implementation rather than a line-by-line translation. The Java reference already establishes TCP networking, RESP handling, GET/SET, TTL, replication, PSYNC/FULLRESYNC plumbing, ACK/WAIT, transactions, Docker, Azure DevOps, Kubernetes and Helm. CacheVault extends that foundation with real RDB snapshots, AOF recovery, WATCH/optimistic locking, eviction, Pub/Sub, Lists, comprehensive tests and benchmarking.
+---
 
-## Architecture
+## Features
+
+### TCP Server
+
+- TCP-based client/server communication
+- Concurrent client connections
+- Configurable host and port
+- Graceful server startup and shutdown
+- Connection lifecycle management
+- Command dispatching
+- Master and replica server modes
+- CLI configuration
+
+---
+
+## RESP Protocol
+
+RESP request parsing and response serialization for:
+
+- Simple Strings
+- Errors
+- Integers
+- Bulk Strings
+- Arrays
+- Multiple commands
+- Pipelined commands
+
+---
+
+## Core Commands
+
+Implemented commands:
 
 ```text
-Client
-  │ RESP / TCP
-  ▼
-Server / Connection Management
-  │
-  ├── RESP parser/serializer
-  ├── Command engine
-  ├── Transaction + WATCH state
-  ├── Pub/Sub broker
-  │
-  ▼
-Concurrent In-Memory Data Store
-  │       │
-  │       ├── TTL / expiration
-  │       ├── LRU / LFU / Random eviction
-  │       └── Lists
-  │
-  ├──────────────┬──────────────────┐
-  ▼              ▼                  ▼
-AOF            RDB              Replication
-replay         snapshots        master → replicas
+PING
+ECHO
+GET
+SET
+DEL
+INCR
 ```
 
-## Supported commands
+---
 
-`PING`, `ECHO`, `GET`, `SET`, `DEL`, `INCR`, `MULTI`, `EXEC`, `DISCARD`, `WATCH`, `INFO replication`, `REPLCONF`, `PSYNC`, `WAIT`, `SUBSCRIBE`, `UNSUBSCRIBE`, `PUBLISH`, `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LRANGE`.
+## Key Expiration / TTL
 
-`SET` supports the required `PX` expiration option.
+Implemented:
 
-## Project structure
+- Key expiration
+- Expiration timestamps
+- `SET` with millisecond expiration
+- `PX`
+- Expiration checks during key access
+- TTL reset/update behavior
+- Concurrent expiration handling
+
+Example:
 
 ```text
-CacheVault/
-├── src/
-│   ├── CacheVault.Server/           TCP server and connection lifecycle
-│   ├── CacheVault.Core/             data store, values, TTL, eviction
-│   ├── CacheVault.Protocol/         RESP parser/serializer
-│   ├── CacheVault.Persistence/      RDB + AOF
-│   ├── CacheVault.Replication/      master/replica state and ACKs
-│   └── CacheVault.Infrastructure/   command engine and Pub/Sub
-├── tests/
-│   ├── CacheVault.UnitTests/
-│   ├── CacheVault.IntegrationTests/
-│   └── CacheVault.EndToEndTests/
-├── benchmarks/CacheVault.Benchmarks/
-├── deploy/
-├── helm/cachevault/
-├── .github/workflows/ci.yml
-├── Dockerfile
-├── docker-compose.yml
-└── CacheVault.sln
+SET name CacheVault PX 5000
 ```
 
-## Build and run
+---
 
-```bash
-dotnet restore CacheVault.sln
-dotnet build CacheVault.sln -c Release
-dotnet test CacheVault.sln -c Release
-dotnet run --project src/CacheVault.Server -- --host 0.0.0.0 --port 6379
+## Transactions
+
+Redis-style transaction support:
+
+```text
+MULTI
+EXEC
+DISCARD
 ```
 
-A Redis-compatible client can connect to port `6379`.
+Implemented:
+
+- Transaction command queue
+- `QUEUED` responses
+- Atomic transaction execution
+- Transaction isolation
+- Transaction state management
+- `EXEC` execution
+- `DISCARD` transaction cancellation
+
+Supported transactional commands include:
+
+```text
+GET
+SET
+DEL
+INCR
+```
+
+---
+
+## WATCH
+
+Optimistic concurrency control with:
+
+```text
+WATCH
+MULTI
+EXEC
+DISCARD
+```
+
+Implemented:
+
+- Key version tracking
+- Watched-key tracking
+- Change detection
+- Transaction invalidation
+- Optimistic concurrency
+- `WATCH` + `MULTI` + `EXEC` workflows
+
+---
+
+## Replication
+
+Master/replica replication is implemented with:
+
+- Master role
+- Replica role
+- Replication ID
+- Replication offsets
+- Replication state management
+- Command propagation
+- Replica acknowledgements
+- `INFO replication`
+- `REPLCONF`
+- `PSYNC`
+- `PSYNC2`
+- `FULLRESYNC`
+- Full synchronization
+- Partial synchronization
+- Replication backlog
+- `WAIT`
+
+Replication flow:
+
+```text
+                    ┌─────────────────┐
+                    │      Master     │
+                    │                 │
+                    │  Command Store  │
+                    └────────┬────────┘
+                             │
+                    Replication Stream
+                             │
+              ┌──────────────┴──────────────┐
+              │                             │
+              ▼                             ▼
+      ┌───────────────┐             ┌───────────────┐
+      │    Replica    │             │    Replica    │
+      │       #1      │             │       #2      │
+      └───────────────┘             └───────────────┘
+```
+
+---
+
+## Replication Acknowledgement
+
+Implemented replication acknowledgement mechanisms:
+
+- Replica offset tracking
+- Replica acknowledgement
+- Waiting for replica synchronization
+- `WAIT`
+
+---
 
 ## Persistence
 
 ### RDB
 
-CacheVault writes a real binary snapshot containing format/version metadata, keys, supported value types, TTL timestamps and entry versions. Snapshots are written to a temporary file and atomically moved into place. The same RDB representation is used for initial replica synchronization.
+Implemented snapshot persistence:
+
+- Snapshot creation
+- Snapshot loading
+- Key/value persistence
+- TTL persistence
+- Startup restoration
+- Configurable RDB directory
+- Configurable RDB enable/disable
 
 ### AOF
 
-Mutating commands are appended as RESP command arrays. On restart the AOF is parsed and replayed through the command engine without re-appending or re-propagating recovery commands.
+Implemented append-only persistence:
 
-## Replication
+- Command logging
+- AOF replay
+- Startup recovery
+- Configurable AOF file
+- Configurable AOF directory
+- AOF enable/disable
+- Command persistence
 
-A master maintains a replication ID and byte offset. Replicas perform the initial `PING` / `REPLCONF` / `PSYNC` handshake, receive `FULLRESYNC` and an RDB snapshot, then consume the master command stream. `REPLCONF ACK`, `GETACK` and `WAIT` provide acknowledgement tracking.
-
-## Transactions and WATCH
-
-Each TCP connection has isolated transaction state. `MULTI` queues commands, `EXEC` evaluates them atomically under the database transaction gate, and `DISCARD` clears the queue. `WATCH` records per-key versions and causes `EXEC` to abort when a watched key changes.
-
-## RESP and networking
-
-The protocol parser treats TCP as a stream: a single read may contain several commands and a command may be split across several reads. Pipelining, nested arrays, bulk lengths, nulls and malformed input are handled at the protocol boundary.
+---
 
 ## Eviction
 
-Configure `--maxmemory` and `--maxmemory-policy` with `Lru`, `Lfu`, or `Random`. `NoEviction` is the default.
+Configurable maximum-memory eviction with:
 
-## Docker
+- LRU
+- LFU
+- Random eviction
 
-```bash
-docker build -t cachevault .
-docker compose up --build
-```
+Implemented:
 
-The Compose topology starts one master and two replicas.
+- Maximum memory configuration
+- Memory-limit enforcement
+- Eviction policy selection
+- Key removal under memory pressure
+- Concurrent eviction handling
 
-## Kubernetes / Helm
+---
 
-Raw manifests are under `deploy/kubernetes`. The Helm chart is under `helm/cachevault`.
+## Pub/Sub
 
-```bash
-helm lint helm/cachevault
-helm install cachevault helm/cachevault
-```
-
-## Configuration
-
-Important options:
+Redis-style publish/subscribe functionality:
 
 ```text
---host <address>
---port <port>
---replicaof <master-host> <master-port>
---rdb-path <path>
---aof-path <path>
---no-rdb
---no-aof
---rdb-interval <seconds>
---maxmemory <bytes>
---maxmemory-policy <NoEviction|Lru|Lfu|Random>
---log-level <level>
+SUBSCRIBE
+PUBLISH
 ```
 
-## Testing
+Implemented:
 
-The test projects cover data-store concurrency, TTL, lists, RESP partial reads/pipelining and protocol serialization. The solution is structured so replication, persistence, Pub/Sub and full TCP end-to-end tests can exercise the same production command engine.
+- Channel subscriptions
+- Multiple channel subscriptions
+- Message publishing
+- Subscriber tracking
+- Publisher-to-subscriber delivery
+- Asynchronous message delivery
+- Multiple connected subscribers
 
-## Benchmarking
+Example:
 
-```bash
-dotnet run -c Release --project benchmarks/CacheVault.Benchmarks
+```text
+SUBSCRIBE news
 ```
 
-BenchmarkDotNet is used for store-level GET/SET measurements. The benchmarking project is intentionally separate from correctness tests.
+Another client:
 
-## Reference implementation
+```text
+PUBLISH news hello
+```
 
-The original Java repository snapshot is retained as a development reference only. CacheVault does not copy Java source mechanically. Where the Java implementation is simplified—most notably its embedded empty RDB payload—the C# implementation uses the requirements of this project as the source of truth and implements the deeper behavior directly.
+---
+
+## Lists
+
+Redis-style list data structure and commands:
+
+```text
+LPUSH
+RPUSH
+LPOP
+RPOP
+LRANGE
+LLEN
+```
+
+Implemented:
+
+- Left push
+- Right push
+- Left pop
+- Right pop
+- Range retrieval
+- List length
+- Multiple-element push
+- Correct Redis-compatible list ordering
+- Thread-safe list operations
+
+Example:
+
+```text
+LPUSH numbers one two three
+LRANGE numbers 0 -1
+```
+
+Result:
+
+```text
+three
+two
+one
+```
+
+---
+
+## Concurrency
+
+Implemented concurrency support across the server and data layer:
+
+- Concurrent TCP clients
+- Thread-safe key/value storage
+- Concurrent transactions
+- Concurrent list operations
+- Concurrent TTL handling
+- Concurrent Pub/Sub operations
+- Concurrent replication handling
+- Synchronization around shared server state
+
+---
+
+## Architecture
+
+```text
+                         ┌─────────────────────┐
+                         │      TCP Client      │
+                         │    redis-cli / App   │
+                         └──────────┬──────────┘
+                                    │
+                                    │ RESP
+                                    ▼
+                         ┌─────────────────────┐
+                         │   CacheVault Server │
+                         └──────────┬──────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │    RESP Protocol    │
+                         │ Parser / Serializer │
+                         └──────────┬──────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │  Command Dispatcher │
+                         └──────────┬──────────┘
+                                    │
+              ┌─────────────────────┼─────────────────────┐
+              │                     │                     │
+              ▼                     ▼                     ▼
+       ┌────────────┐        ┌────────────┐        ┌────────────┐
+       │ Key/Value  │        │   Lists    │        │  Pub/Sub   │
+       │   Store    │        │   Store    │        │   System   │
+       └─────┬──────┘        └────────────┘        └────────────┘
+             │
+       ┌─────┼──────────────┬──────────────┐
+       │     │              │              │
+       ▼     ▼              ▼              ▼
+      TTL  Eviction     Transactions   WATCH
+       │                    │
+       │                    │
+       └──────────┬─────────┘
+                  │
+          ┌───────┴────────┐
+          │                │
+          ▼                ▼
+    ┌───────────┐    ┌──────────────┐
+    │    RDB    │    │     AOF      │
+    │ Persistence│   │ Persistence  │
+    └───────────┘    └──────────────┘
+
+                  Replication
+                       │
+                       ▼
+               ┌─────────────┐
+               │    Master   │
+               └──────┬──────┘
+                      │
+             ┌────────┴────────┐
+             ▼                 ▼
+        ┌──────────┐      ┌──────────┐
+        │ Replica  │      │ Replica  │
+        └──────────┘      └──────────┘
+```
+
+---
+
+# Build
+
+Restore dependencies:
+
+```powershell
+dotnet restore CacheVault.slnx
+```
+
+Build the complete solution:
+
+```powershell
+dotnet build CacheVault.slnx -c Release
+```
+
+---
+
+# Testing
+
+Run all tests:
+
+```powershell
+dotnet test CacheVault.slnx -c Release
+```
+
+Test projects:
+
+```text
+CacheVault.UnitTests
+CacheVault.IntegrationTests
+```
+
+---
+
+# Running CacheVault
+
+Start CacheVault:
+
+```powershell
+dotnet run -c Release --project CacheVault.Server -- --host 127.0.0.1 --port 6379 --no-aof --no-rdb
+```
+
+Connect using `redis-cli`:
+
+```powershell
+redis-cli -p 6379
+```
+
+---
+
+## Basic Commands
+
+### PING
+
+```text
+PING
+```
+
+```text
+PONG
+```
+
+### SET / GET
+
+```text
+SET name CacheVault
+GET name
+```
+
+### INCR
+
+```text
+INCR counter
+```
+
+### DEL
+
+```text
+DEL name
+```
+
+### ECHO
+
+```text
+ECHO hello
+```
+
+---
+
+# TTL Example
+
+```text
+SET session abc123 PX 10000
+GET session
+```
+
+After the expiration period:
+
+```text
+GET session
+```
+
+returns a nil response.
+
+---
+
+# Transaction Example
+
+```text
+MULTI
+SET name CacheVault
+INCR counter
+GET name
+EXEC
+```
+
+---
+
+# WATCH Example
+
+```text
+WATCH account
+MULTI
+SET account updated
+EXEC
+```
+
+If a watched key is modified before `EXEC`, the transaction is invalidated.
+
+---
+
+# List Example
+
+```text
+LPUSH numbers one two three
+LRANGE numbers 0 -1
+```
+
+Result:
+
+```text
+three
+two
+one
+```
+
+Additional operations:
+
+```text
+RPUSH numbers four
+LLEN numbers
+LPOP numbers
+RPOP numbers
+```
+
+---
+
+# Pub/Sub Example
+
+Subscriber:
+
+```text
+SUBSCRIBE notifications
+```
+
+Publisher:
+
+```text
+PUBLISH notifications hello
+```
+
+The subscriber receives the published message asynchronously.
+
+---
+
+# Replication Example
+
+Start the master:
+
+```powershell
+dotnet run -c Release --project CacheVault.Server -- --host 127.0.0.1 --port 6379
+```
+
+Start the replica:
+
+```powershell
+dotnet run -c Release --project CacheVault.Server -- --host 127.0.0.1 --port 6380 --replica --master-host 127.0.0.1 --master-port 6379
+```
+
+Check replication information:
+
+```text
+INFO replication
+```
+
+---
+
+# Persistence
+
+## RDB
+
+Run with RDB enabled:
+
+```powershell
+dotnet run -c Release --project CacheVault.Server -- --host 127.0.0.1 --port 6379
+```
+
+Run with RDB disabled:
+
+```powershell
+dotnet run -c Release --project CacheVault.Server -- --host 127.0.0.1 --port 6379 --no-rdb
+```
+
+## AOF
+
+Run with AOF enabled:
+
+```powershell
+dotnet run -c Release --project CacheVault.Server -- --host 127.0.0.1 --port 6379
+```
+
+Run with AOF disabled:
+
+```powershell
+dotnet run -c Release --project CacheVault.Server -- --host 127.0.0.1 --port 6379 --no-aof
+```
