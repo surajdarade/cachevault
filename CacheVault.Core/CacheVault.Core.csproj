@@ -8,9 +8,9 @@
 
   <ItemGroup>
     <Folder Include="DataStructures\Lists\" />
+    <Folder Include="Eviction\" />
     <Folder Include="Expiration\" />
     <Folder Include="Concurrency\" />
-    <Folder Include="Eviction\" />
     <Folder Include="PubSub\" />
     <Folder Include="Transactions\" />
   </ItemGroup>

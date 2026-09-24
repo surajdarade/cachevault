@@ -1,4 +1,5 @@
 ﻿using CacheVault.Core.Abstractions;
+using CacheVault.Core.Lists;
 using CacheVault.Protocol.Resp.Types;
 using CacheVault.Server.Commands.Abstractions;
 using CacheVault.Server.Commands.Dispatch;
@@ -9,10 +10,12 @@ namespace CacheVault.Server.Commands.Implementations;
 public sealed class ExecCommand : IRedisCommand {
     private readonly CommandDispatcher _dispatcher;
     private readonly IKeyValueStore _store;
+    private readonly IListStore? _lists;
 
     public ExecCommand(
         CommandDispatcher dispatcher,
-        IKeyValueStore store) {
+        IKeyValueStore store,
+        IListStore? lists = null) {
         ArgumentNullException.ThrowIfNull(
             dispatcher);
 
@@ -24,6 +27,9 @@ public sealed class ExecCommand : IRedisCommand {
 
         _store =
             store;
+
+        _lists =
+            lists;
     }
 
     public string Name =>
@@ -49,7 +55,7 @@ public sealed class ExecCommand : IRedisCommand {
         }
 
         if (context.Session.WatchState.HasChanged(
-                _store.GetVersion)) {
+                GetVersion)) {
             context.Session.DrainTransaction();
             context.Session.WatchState.Clear();
 
@@ -86,4 +92,14 @@ public sealed class ExecCommand : IRedisCommand {
         return new RespArray(
             responses);
     }
+    private long GetVersion(string key)
+    {
+        if (_lists?.Contains(key) == true)
+        {
+            return _lists.GetVersion(key);
+        }
+
+        return _store.GetVersion(key);
+    }
+
 }

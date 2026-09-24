@@ -1,5 +1,6 @@
 ﻿using System.Globalization;
 using CacheVault.Core.Abstractions;
+using CacheVault.Core.Lists;
 using CacheVault.Protocol.Resp.Types;
 using CacheVault.Server.Commands.Abstractions;
 
@@ -8,10 +9,12 @@ namespace CacheVault.Server.Commands.Implementations;
 public sealed class SetCommand : IRedisCommand {
     private readonly IKeyValueStore _store;
     private readonly IClock _clock;
+    private readonly IListStore? _lists;
 
     public SetCommand(
         IKeyValueStore store,
-        IClock clock) {
+        IClock clock,
+        IListStore? lists = null) {
         ArgumentNullException.ThrowIfNull(
             store);
 
@@ -20,6 +23,7 @@ public sealed class SetCommand : IRedisCommand {
 
         _store = store;
         _clock = clock;
+        _lists = lists;
     }
 
     public string Name => "SET";
@@ -53,6 +57,8 @@ public sealed class SetCommand : IRedisCommand {
                     arguments[2],
                     arguments[3]);
         }
+
+        _lists?.Remove(key.Value);
 
         _store.Set(
             key.Value,

@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using CacheVault.Server.Configuration;
 using CacheVault.Server.Networking.Abstractions;
 using CacheVault.Server.Recovery;
+using CacheVault.Server.Replication;
 
 namespace CacheVault.Server.Networking.Server;
 
@@ -14,6 +15,8 @@ public sealed class RedisTcpServer :
     private readonly IConnectionHandler _connectionHandler;
 
     private readonly RecoveryCoordinator _recoveryCoordinator;
+    private readonly RdbPersistenceService _rdbPersistenceService;
+    private readonly ReplicaSynchronizationService? _replicaSynchronizationService;
 
     private readonly ConcurrentDictionary<Guid, Task> _clientTasks =
         new();
@@ -24,11 +27,15 @@ public sealed class RedisTcpServer :
     private TcpListener? _listener;
 
     private CancellationTokenSource? _serverCancellationTokenSource;
+    private Task? _replicaSynchronizationTask;
+    private bool _serverStarted;
 
     public RedisTcpServer(
         ServerOptions options,
         IConnectionHandler connectionHandler,
-        RecoveryCoordinator recoveryCoordinator) {
+        RecoveryCoordinator recoveryCoordinator,
+        RdbPersistenceService rdbPersistenceService,
+        ReplicaSynchronizationService? replicaSynchronizationService = null) {
         ArgumentNullException.ThrowIfNull(
             options);
 
@@ -46,6 +53,15 @@ public sealed class RedisTcpServer :
 
         _recoveryCoordinator =
             recoveryCoordinator;
+
+        ArgumentNullException.ThrowIfNull(
+            rdbPersistenceService);
+
+        _rdbPersistenceService =
+            rdbPersistenceService;
+
+        _replicaSynchronizationService =
+            replicaSynchronizationService;
     }
 
     public IPEndPoint? LocalEndpoint =>
@@ -90,6 +106,15 @@ public sealed class RedisTcpServer :
                         _options.Port);
 
                 _listener.Start();
+                _serverStarted = true;
+
+                if (_options.IsReplica &&
+                    _replicaSynchronizationService is not null)
+                {
+                    _replicaSynchronizationTask =
+                        _replicaSynchronizationService.RunAsync(
+                            serverCancellationToken);
+                }
             }
 
             while (!serverCancellationToken.IsCancellationRequested) {
@@ -123,8 +148,41 @@ public sealed class RedisTcpServer :
                     clientTask);
             }
         }
-        finally {
+        finally
+        {
             StopListener();
+
+            try
+            {
+                _serverCancellationTokenSource?.Cancel();
+
+                if (_replicaSynchronizationTask is not null)
+                {
+                    await _replicaSynchronizationTask;
+                }
+
+                Task[] clientTasks =
+                    _clientTasks.Values.ToArray();
+
+                if (clientTasks.Length > 0)
+                {
+                    await Task.WhenAll(
+                        clientTasks);
+                }
+
+                if (_serverStarted)
+                {
+                    await _rdbPersistenceService.SaveAsync(
+                        CancellationToken.None);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            finally
+            {
+                _replicaSynchronizationTask = null;
+            }
 
             CancellationTokenSource?
                 serverCancellationTokenSource;
@@ -142,16 +200,19 @@ public sealed class RedisTcpServer :
     }
 
     public async Task StopAsync(
-        CancellationToken cancellationToken) {
+        CancellationToken cancellationToken)
+    {
         CancellationTokenSource?
             serverCancellationTokenSource;
 
-        lock (_lifecycleLock) {
+        lock (_lifecycleLock)
+        {
             serverCancellationTokenSource =
                 _serverCancellationTokenSource;
         }
 
-        if (serverCancellationTokenSource is null) {
+        if (serverCancellationTokenSource is null)
+        {
             return;
         }
 
@@ -159,18 +220,28 @@ public sealed class RedisTcpServer :
 
         StopListener();
 
+        if (_replicaSynchronizationTask is not null)
+        {
+            await _replicaSynchronizationTask.WaitAsync(
+                cancellationToken);
+
+            _replicaSynchronizationTask = null;
+        }
+
         Task[] clientTasks =
             _clientTasks.Values.ToArray();
 
-        if (clientTasks.Length == 0) {
-            return;
+        if (clientTasks.Length > 0)
+        {
+            await Task.WhenAll(
+                clientTasks.Select(
+                    task =>
+                        task.WaitAsync(
+                            cancellationToken)));
         }
 
-        await Task.WhenAll(
-            clientTasks.Select(
-                task =>
-                    task.WaitAsync(
-                        cancellationToken)));
+        await _rdbPersistenceService.SaveAsync(
+            cancellationToken);
     }
 
     private void StopListener() {

@@ -21,24 +21,39 @@ public sealed class RdbHeaderTests {
             writer,
             header);
 
+        byte[] bytes = stream.ToArray();
+
         Assert.Equal(
-            [
-                (byte)'C',
-                (byte)'V',
-                (byte)'D',
-                (byte)'B',
-                0x03,
-                0x00,
-                0x00,
-                0x00,
-                0x00,
-                0x00,
-                0x00,
-                0x00,
-                0x00,
-                0x00
-            ],
-            stream.ToArray());
+            (byte)'C',
+            bytes[0]);
+
+        Assert.Equal(
+            (byte)'V',
+            bytes[1]);
+
+        Assert.Equal(
+            (byte)'D',
+            bytes[2]);
+
+        Assert.Equal(
+            (byte)'B',
+            bytes[3]);
+
+        Assert.Equal(
+            RdbHeader.CurrentVersion,
+            BitConverter.ToInt32(
+                bytes,
+                4));
+
+        Assert.Equal(
+            14,
+            bytes.Length);
+
+        Assert.All(
+            bytes.Skip(8),
+            value => Assert.Equal(
+                (byte)0,
+                value));
     }
 
     [Fact]

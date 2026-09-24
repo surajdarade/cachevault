@@ -1,9 +1,13 @@
 ﻿using CacheVault.Core.Abstractions;
+using CacheVault.Core.Eviction;
+using CacheVault.Core.Eviction.Abstractions;
 using CacheVault.Core.Storage;
+using CacheVault.Core.Lists;
 using CacheVault.Infrastructure.Time;
 using CacheVault.Persistence.Aof.Reading;
 using CacheVault.Persistence.Aof.Writing;
 using CacheVault.Persistence.Rdb.Reading;
+using CacheVault.Persistence.Rdb.Writing;
 using CacheVault.Persistence.Recovery;
 using CacheVault.Protocol.Resp.Abstractions;
 using CacheVault.Protocol.Resp.Parsing;
@@ -21,6 +25,7 @@ using CacheVault.Server.Networking.Connections;
 using CacheVault.Server.Networking.Server;
 using CacheVault.Server.Recovery;
 using CacheVault.Server.Replication;
+using CacheVault.Server.PubSub;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CacheVault.Server.Configuration;
@@ -36,6 +41,40 @@ public static class ServerServiceCollectionExtensions {
         ArgumentNullException.ThrowIfNull(options);
 
         services.AddSingleton(options);
+
+        services.AddSingleton<PubSubManager>();
+
+        services.AddSingleton<
+            InMemoryListStore>(
+            serviceProvider =>
+            {
+                IEvictionManager evictionManager =
+                    serviceProvider.GetRequiredService<
+                        IEvictionManager>();
+
+                IEvictionCoordinator evictionCoordinator =
+                    serviceProvider.GetRequiredService<
+                        IEvictionCoordinator>();
+
+                return new InMemoryListStore(
+                    evictionManager,
+                    evictionCoordinator);
+            });
+
+        services.AddSingleton<IListStore>(
+            serviceProvider =>
+                serviceProvider.GetRequiredService<
+                    InMemoryListStore>());
+
+        services.AddSingleton<IListStoreSnapshot>(
+            serviceProvider =>
+                serviceProvider.GetRequiredService<
+                    InMemoryListStore>());
+
+        services.AddSingleton<IResettableListStore>(
+            serviceProvider =>
+                serviceProvider.GetRequiredService<
+                    InMemoryListStore>());
 
         services.AddSingleton<
             IClock,
@@ -54,7 +93,36 @@ public static class ServerServiceCollectionExtensions {
             RespStreamReaderFactory>();
 
         services.AddSingleton<
-            InMemoryKeyValueStore>();
+            IEvictionManager>(
+            new EvictionManager(
+                options.MaxMemoryBytes,
+                options.EvictionPolicy));
+
+        services.AddSingleton<
+            IEvictionCoordinator,
+            EvictionCoordinator>();
+
+        services.AddSingleton<
+            InMemoryKeyValueStore>(
+            serviceProvider =>
+            {
+                IClock clock =
+                    serviceProvider.GetRequiredService<
+                        IClock>();
+
+                IEvictionManager evictionManager =
+                    serviceProvider.GetRequiredService<
+                        IEvictionManager>();
+
+                IEvictionCoordinator evictionCoordinator =
+                    serviceProvider.GetRequiredService<
+                        IEvictionCoordinator>();
+
+                return new InMemoryKeyValueStore(
+                    clock,
+                    evictionManager,
+                    evictionCoordinator);
+            });
 
         services.AddSingleton<
             IKeyValueStore>(
@@ -73,8 +141,12 @@ public static class ServerServiceCollectionExtensions {
         // -----------------------------------------------------------------
 
         services.AddSingleton<
-            IReplicationState,
-            ReplicationState>();
+            IReplicationState>(
+            new ReplicationState(
+                isMaster: !options.IsReplica));
+
+        services.AddSingleton<
+            ReplicaSynchronizationStatus>();
 
         services.AddSingleton<
             IReplicationBacklog>(
@@ -175,6 +247,14 @@ public static class ServerServiceCollectionExtensions {
         }
 
         // -----------------------------------------------------------------
+        // Command execution gate
+        // -----------------------------------------------------------------
+
+        services.AddSingleton<
+            ICommandExecutionGate,
+            CommandExecutionGate>();
+
+        // -----------------------------------------------------------------
         // Command dispatcher
         // -----------------------------------------------------------------
 
@@ -201,15 +281,39 @@ public static class ServerServiceCollectionExtensions {
                     serviceProvider.GetRequiredService<
                         IReplicationWaiter>();
 
+                IReplicationState replicationState =
+                    serviceProvider.GetRequiredService<
+                        IReplicationState>();
+
+                PubSubManager pubSubManager =
+                    serviceProvider.GetRequiredService<
+                        PubSubManager>();
+
+                IListStore listStore =
+                    serviceProvider.GetRequiredService<
+                        IListStore>();
+
+                ICommandExecutionGate executionGate =
+                    serviceProvider.GetRequiredService<
+                        ICommandExecutionGate>();
+
                 var dispatcher =
-                    new CommandDispatcher();
+                    new CommandDispatcher(
+                        executionGate,
+                        options.IsReplica);
 
                 IReadOnlyList<IRedisCommand> commands =
                     CommandRegistry.CreateDefaultCommands(
                         store,
                         clock,
                         dispatcher,
-                        replicationWaiter);
+                        replicationWaiter,
+                        pubSubManager,
+                        listStore,
+                        replicationState,
+                        serviceProvider.GetRequiredService<IReplicaRegistry>(),
+                        options,
+                        serviceProvider.GetRequiredService<ReplicaSynchronizationStatus>());
 
                 dispatcher.RegisterCommands(
                     commands);
@@ -233,6 +337,25 @@ public static class ServerServiceCollectionExtensions {
         services.AddSingleton(
             serviceProvider =>
             {
+                IKeyValueStoreSnapshot snapshotStore =
+                    serviceProvider.GetRequiredService<
+                        IKeyValueStoreSnapshot>();
+
+                IListStoreSnapshot listSnapshotStore =
+                    serviceProvider.GetRequiredService<
+                        IListStoreSnapshot>();
+
+                return new RdbSnapshotWriter(
+                    snapshotStore,
+                    listSnapshotStore);
+            });
+
+        services.AddSingleton<
+            RdbPersistenceService>();
+
+        services.AddSingleton(
+            serviceProvider =>
+            {
                 IKeyValueStore store =
                     serviceProvider.GetRequiredService<
                         IKeyValueStore>();
@@ -241,9 +364,14 @@ public static class ServerServiceCollectionExtensions {
                     serviceProvider.GetRequiredService<
                         RdbSnapshotReader>();
 
+                IListStore listStore =
+                    serviceProvider.GetRequiredService<
+                        IListStore>();
+
                 return new RdbSnapshotLoader(
                     store,
-                    reader);
+                    reader,
+                    listStore);
             });
 
         // -----------------------------------------------------------------

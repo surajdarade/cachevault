@@ -3,6 +3,7 @@
 namespace CacheVault.Replication.State;
 
 public sealed class ReplicationState : IReplicationState {
+    private string _replicationId;
     private long _replicationOffset;
     private long _acknowledgedOffset;
 
@@ -11,7 +12,7 @@ public sealed class ReplicationState : IReplicationState {
         string? replicationId = null) {
         IsMaster = isMaster;
 
-        ReplicationId =
+        _replicationId =
             string.IsNullOrWhiteSpace(replicationId)
                 ? Guid.NewGuid().ToString("N")
                 : replicationId;
@@ -20,7 +21,8 @@ public sealed class ReplicationState : IReplicationState {
         _acknowledgedOffset = 0;
     }
 
-    public string ReplicationId { get; }
+    public string ReplicationId =>
+        Volatile.Read(ref _replicationId);
 
     public long ReplicationOffset =>
         Interlocked.Read(
@@ -43,6 +45,28 @@ public sealed class ReplicationState : IReplicationState {
         Interlocked.Add(
             ref _replicationOffset,
             bytes);
+    }
+
+    public void SetReplicationState(
+        string replicationId,
+        long replicationOffset)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(
+            replicationId);
+
+        if (replicationOffset < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(replicationOffset));
+        }
+
+        Volatile.Write(
+            ref _replicationId,
+            replicationId);
+
+        Interlocked.Exchange(
+            ref _replicationOffset,
+            replicationOffset);
     }
 
     public void Acknowledge(

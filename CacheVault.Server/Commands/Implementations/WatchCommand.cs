@@ -1,4 +1,5 @@
 ﻿using CacheVault.Core.Abstractions;
+using CacheVault.Core.Lists;
 using CacheVault.Protocol.Resp.Types;
 using CacheVault.Server.Commands.Abstractions;
 
@@ -6,12 +7,16 @@ namespace CacheVault.Server.Commands.Implementations;
 
 public sealed class WatchCommand : IRedisCommand {
     private readonly IKeyValueStore _store;
+    private readonly IListStore? _lists;
 
     public WatchCommand(
-        IKeyValueStore store) {
+        IKeyValueStore store,
+        IListStore? lists = null)
+    {
         ArgumentNullException.ThrowIfNull(store);
 
         _store = store;
+        _lists = lists;
     }
 
     public string Name => "WATCH";
@@ -44,9 +49,10 @@ public sealed class WatchCommand : IRedisCommand {
             new Dictionary<string, long>(
                 StringComparer.Ordinal);
 
-        foreach (string key in keys) {
+        foreach (string key in keys)
+        {
             versions[key] =
-                _store.GetVersion(key);
+                GetVersion(key);
         }
 
         foreach (KeyValuePair<string, long> entry in versions) {
@@ -57,5 +63,14 @@ public sealed class WatchCommand : IRedisCommand {
 
         return ValueTask.FromResult<RespValue>(
             new RespSimpleString("OK"));
+    }
+    private long GetVersion(string key)
+    {
+        if (_lists?.Contains(key) == true)
+        {
+            return _lists.GetVersion(key);
+        }
+
+        return _store.GetVersion(key);
     }
 }

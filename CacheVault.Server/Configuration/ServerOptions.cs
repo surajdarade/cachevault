@@ -1,4 +1,6 @@
-﻿namespace CacheVault.Server.Configuration;
+﻿using CacheVault.Core.Models;
+
+namespace CacheVault.Server.Configuration;
 
 public sealed class ServerOptions {
     public const string SectionName = "Server";
@@ -28,4 +30,9 @@ public sealed class ServerOptions {
 
     public string AofFilePath { get; set; } =
         "cachevault.aof";
+
+    public long MaxMemoryBytes { get; set; }
+
+    public EvictionPolicy EvictionPolicy { get; set; } =
+        EvictionPolicy.NoEviction;
 }

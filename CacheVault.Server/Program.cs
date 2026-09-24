@@ -8,6 +8,10 @@ ServiceCollection services =
 var serverOptions =
     new ServerOptions();
 
+CommandLineOptions.Apply(
+    serverOptions,
+    args);
+
 services.AddCacheVaultServer(
     serverOptions);
 

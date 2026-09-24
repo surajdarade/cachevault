@@ -1,4 +1,5 @@
 ﻿using CacheVault.Core.Abstractions;
+using CacheVault.Core.Lists;
 using CacheVault.Protocol.Resp.Types;
 using CacheVault.Server.Commands.Abstractions;
 
@@ -6,9 +7,11 @@ namespace CacheVault.Server.Commands.Implementations;
 
 public sealed class GetCommand : IRedisCommand {
     private readonly IKeyValueStore _store;
+    private readonly IListStore? _lists;
 
-    public GetCommand(IKeyValueStore store) {
+    public GetCommand(IKeyValueStore store, IListStore? lists = null) {
         _store = store;
+        _lists = lists;
     }
 
     public string Name => "GET";
@@ -25,6 +28,11 @@ public sealed class GetCommand : IRedisCommand {
             key.Value is null) {
             throw new CommandArgumentException(
                 "ERR invalid key");
+        }
+
+        if (_lists?.Contains(key.Value) == true) {
+            throw new CommandArgumentException(
+                "WRONGTYPE Operation against a key holding the wrong kind of value");
         }
 
         if (!_store.TryGet(

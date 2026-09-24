@@ -1,14 +1,26 @@
-﻿namespace CacheVault.Persistence.Rdb.Format;
+namespace CacheVault.Persistence.Rdb.Format;
 
-public static class RdbRecordWriter {
+public static class RdbRecordWriter
+{
     public static void WriteRecord(
         RdbBinaryWriter writer,
         RdbRecord record,
-        DateTimeOffset now) {
+        DateTimeOffset now)
+    {
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(record);
 
-        if (record.ExpiresAt.HasValue) {
+        if (record.Type == RdbRecordType.List)
+        {
+            WriteListRecord(
+                writer,
+                record);
+
+            return;
+        }
+
+        if (record.ExpiresAt.HasValue)
+        {
             WriteExpiration(
                 writer,
                 record.ExpiresAt.Value,
@@ -27,11 +39,39 @@ public static class RdbRecordWriter {
             record.Value);
     }
 
+    private static void WriteListRecord(
+        RdbBinaryWriter writer,
+        RdbRecord record)
+    {
+        IReadOnlyList<string> values =
+            record.ListValues ?? [];
+
+        writer.WriteByte(
+            (byte)RdbOpcode.ListValue);
+
+        RdbStringEncoder.WriteString(
+            writer,
+            record.Key);
+
+        RdbLengthEncoder.WriteLength(
+            writer,
+            checked((uint)values.Count));
+
+        foreach (string value in values)
+        {
+            RdbStringEncoder.WriteString(
+                writer,
+                value);
+        }
+    }
+
     private static void WriteExpiration(
         RdbBinaryWriter writer,
         DateTimeOffset expiresAt,
-        DateTimeOffset now) {
-        if (expiresAt <= now) {
+        DateTimeOffset now)
+    {
+        if (expiresAt <= now)
+        {
             throw new ArgumentException(
                 "An expired record cannot be persisted.",
                 nameof(expiresAt));
@@ -40,7 +80,8 @@ public static class RdbRecordWriter {
         long milliseconds =
             expiresAt.ToUnixTimeMilliseconds();
 
-        if (milliseconds % 1000 == 0) {
+        if (milliseconds % 1000 == 0)
+        {
             writer.WriteByte(
                 (byte)RdbOpcode.ExpireSeconds);
 

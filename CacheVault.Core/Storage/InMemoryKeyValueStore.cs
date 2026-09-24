@@ -1,12 +1,14 @@
 ﻿using System.Collections.Concurrent;
 using CacheVault.Core.Abstractions;
+using CacheVault.Core.Eviction.Abstractions;
 using CacheVault.Core.Models;
 
 namespace CacheVault.Core.Storage;
 
 public sealed class InMemoryKeyValueStore :
     IKeyValueStore,
-    IKeyValueStoreSnapshot {
+    IKeyValueStoreSnapshot,
+    IResettableKeyValueStore {
     private readonly ConcurrentDictionary<string, StoredValue> _values =
         new(StringComparer.Ordinal);
 
@@ -14,14 +16,37 @@ public sealed class InMemoryKeyValueStore :
         new(StringComparer.Ordinal);
 
     private readonly IClock _clock;
+    private readonly IEvictionManager _evictionManager;
+    private readonly IEvictionCoordinator? _evictionCoordinator;
 
     private long _version;
 
     public InMemoryKeyValueStore(
-        IClock clock) {
+        IClock clock,
+        IEvictionManager? evictionManager = null,
+        IEvictionCoordinator? evictionCoordinator = null) {
         ArgumentNullException.ThrowIfNull(clock);
 
         _clock = clock;
+        _evictionManager =
+            evictionManager ??
+            new CacheVault.Core.Eviction.EvictionManager(
+                0,
+                EvictionPolicy.NoEviction);
+
+        _evictionCoordinator =
+            evictionCoordinator;
+
+        _evictionCoordinator?.RegisterStringKeyspace(
+            RemoveForEviction);
+    }
+
+    public void Clear()
+    {
+        foreach (string key in _values.Keys.ToArray())
+        {
+            Remove(key);
+        }
     }
 
     public bool TryGet(
@@ -38,22 +63,16 @@ public sealed class InMemoryKeyValueStore :
         }
 
         if (IsExpired(storedValue)) {
-            if (_values.TryRemove(
-                    new KeyValuePair<string, StoredValue>(
-                        key,
-                        storedValue))) {
-                long expirationVersion =
-                    Interlocked.Increment(
-                        ref _version);
-
-                _keyVersions[key] =
-                    expirationVersion;
-            }
+            RemoveExpiredValue(
+                key,
+                storedValue);
 
             value = null;
 
             return false;
         }
+
+        _evictionManager.OnAccess(key);
 
         value = storedValue;
 
@@ -74,8 +93,7 @@ public sealed class InMemoryKeyValueStore :
         var storedValue =
             new StoredValue(
                 value,
-                expiresAt)
-            {
+                expiresAt) {
                 Version = version
             };
 
@@ -84,6 +102,12 @@ public sealed class InMemoryKeyValueStore :
 
         _keyVersions[key] =
             version;
+
+        _evictionManager.OnSet(
+            key,
+            storedValue);
+
+        EnforceMemoryLimit();
     }
 
     public bool Remove(
@@ -96,12 +120,8 @@ public sealed class InMemoryKeyValueStore :
             return false;
         }
 
-        long version =
-            Interlocked.Increment(
-                ref _version);
-
-        _keyVersions[key] =
-            version;
+        MarkKeyChanged(key);
+        _evictionManager.OnRemove(key);
 
         return true;
     }
@@ -130,8 +150,7 @@ public sealed class InMemoryKeyValueStore :
 
                 var createdValue =
                     new StoredValue(
-                        amount.ToString())
-                    {
+                        amount.ToString()) {
                         Version = version
                     };
 
@@ -141,6 +160,12 @@ public sealed class InMemoryKeyValueStore :
                     _keyVersions[key] =
                         version;
 
+                    _evictionManager.OnSet(
+                        key,
+                        createdValue);
+
+                    EnforceMemoryLimit();
+
                     return amount;
                 }
 
@@ -148,17 +173,9 @@ public sealed class InMemoryKeyValueStore :
             }
 
             if (IsExpired(currentValue)) {
-                if (_values.TryRemove(
-                        new KeyValuePair<string, StoredValue>(
-                            key,
-                            currentValue))) {
-                    long expirationVersion =
-                        Interlocked.Increment(
-                            ref _version);
-
-                    _keyVersions[key] =
-                        expirationVersion;
-                }
+                RemoveExpiredValue(
+                    key,
+                    currentValue);
 
                 continue;
             }
@@ -189,8 +206,7 @@ public sealed class InMemoryKeyValueStore :
             var updatedValue =
                 new StoredValue(
                     newNumber.ToString(),
-                    currentValue.ExpiresAt)
-                {
+                    currentValue.ExpiresAt) {
                     Version = updatedVersion
                 };
 
@@ -200,6 +216,12 @@ public sealed class InMemoryKeyValueStore :
                     currentValue)) {
                 _keyVersions[key] =
                     updatedVersion;
+
+                _evictionManager.OnSet(
+                    key,
+                    updatedValue);
+
+                EnforceMemoryLimit();
 
                 return newNumber;
             }
@@ -229,17 +251,9 @@ public sealed class InMemoryKeyValueStore :
         foreach (KeyValuePair<string, StoredValue> entry
             in _values) {
             if (IsExpired(entry.Value)) {
-                if (_values.TryRemove(
-                        new KeyValuePair<string, StoredValue>(
-                            entry.Key,
-                            entry.Value))) {
-                    long expirationVersion =
-                        Interlocked.Increment(
-                            ref _version);
-
-                    _keyVersions[entry.Key] =
-                        expirationVersion;
-                }
+                RemoveExpiredValue(
+                    entry.Key,
+                    entry.Value);
 
                 continue;
             }
@@ -252,6 +266,91 @@ public sealed class InMemoryKeyValueStore :
         }
 
         return snapshot;
+    }
+
+    private void EnforceMemoryLimit()
+    {
+        if (_evictionCoordinator is not null)
+        {
+            _evictionCoordinator.EnforceMemoryLimit();
+            return;
+        }
+
+        if (_evictionManager.MaxMemoryBytes <= 0)
+        {
+            return;
+        }
+
+        RemoveExpiredEntries();
+
+        while (_evictionManager.MemoryUsageBytes >
+               _evictionManager.MaxMemoryBytes)
+        {
+            if (!_evictionManager.TrySelectCandidate(
+                    out string? candidate,
+                    out bool isList) ||
+                candidate is null)
+            {
+                return;
+            }
+
+            if (isList)
+            {
+                return;
+            }
+
+            RemoveForEviction(candidate);
+            _evictionManager.OnRemove(candidate);
+        }
+    }
+
+    private bool RemoveForEviction(string key)
+    {
+        if (!_values.TryRemove(
+                key,
+                out _))
+        {
+            return false;
+        }
+
+        MarkKeyChanged(key);
+
+        return true;
+    }
+
+    private void RemoveExpiredEntries() {
+        foreach (KeyValuePair<string, StoredValue> entry
+            in _values) {
+            if (IsExpired(entry.Value)) {
+                RemoveExpiredValue(
+                    entry.Key,
+                    entry.Value);
+            }
+        }
+    }
+
+    private void RemoveExpiredValue(
+        string key,
+        StoredValue value) {
+        if (!_values.TryRemove(
+                new KeyValuePair<string, StoredValue>(
+                    key,
+                    value))) {
+            return;
+        }
+
+        MarkKeyChanged(key);
+        _evictionManager.OnRemove(key);
+    }
+
+    private void MarkKeyChanged(
+        string key) {
+        long version =
+            Interlocked.Increment(
+                ref _version);
+
+        _keyVersions[key] =
+            version;
     }
 
     private bool IsExpired(

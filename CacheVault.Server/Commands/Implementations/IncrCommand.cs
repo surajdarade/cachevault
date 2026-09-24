@@ -1,4 +1,5 @@
 ﻿using CacheVault.Core.Abstractions;
+using CacheVault.Core.Lists;
 using CacheVault.Protocol.Resp.Types;
 using CacheVault.Server.Commands.Abstractions;
 
@@ -9,13 +10,16 @@ public sealed class IncrCommand : IRedisCommand {
         "ERR value is not an integer or out of range";
 
     private readonly IKeyValueStore _store;
+    private readonly IListStore? _lists;
 
     public IncrCommand(
-        IKeyValueStore store) {
+        IKeyValueStore store,
+        IListStore? lists = null) {
         ArgumentNullException.ThrowIfNull(
             store);
 
         _store = store;
+        _lists = lists;
     }
 
     public string Name => "INCR";
@@ -32,6 +36,11 @@ public sealed class IncrCommand : IRedisCommand {
             key.Value is null) {
             throw new CommandArgumentException(
                 "ERR invalid key");
+        }
+
+        if (_lists?.Contains(key.Value) == true) {
+            throw new CommandArgumentException(
+                "WRONGTYPE Operation against a key holding the wrong kind of value");
         }
 
         try {

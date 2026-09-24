@@ -1,4 +1,5 @@
 ﻿using CacheVault.Core.Abstractions;
+using CacheVault.Core.Lists;
 using CacheVault.Protocol.Resp.Types;
 using CacheVault.Server.Commands.Abstractions;
 
@@ -6,9 +7,11 @@ namespace CacheVault.Server.Commands.Implementations;
 
 public sealed class DelCommand : IRedisCommand {
     private readonly IKeyValueStore _store;
+    private readonly IListStore? _lists;
 
-    public DelCommand(IKeyValueStore store) {
+    public DelCommand(IKeyValueStore store, IListStore? lists = null) {
         _store = store;
+        _lists = lists;
     }
 
     public string Name => "DEL";
@@ -30,7 +33,13 @@ public sealed class DelCommand : IRedisCommand {
                     "ERR invalid key");
             }
 
-            if (_store.Remove(key.Value)) {
+            bool removed = _store.Remove(key.Value);
+
+            if (_lists?.Remove(key.Value) == true) {
+                removed = true;
+            }
+
+            if (removed) {
                 removedCount++;
             }
         }

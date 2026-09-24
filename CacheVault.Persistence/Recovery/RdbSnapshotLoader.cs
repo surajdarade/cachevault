@@ -1,15 +1,21 @@
-﻿using CacheVault.Core.Abstractions;
+using CacheVault.Core.Abstractions;
+using CacheVault.Core.Lists;
 using CacheVault.Persistence.Rdb.Reading;
+using CacheVault.Persistence.Rdb.Format;
 
 namespace CacheVault.Persistence.Recovery;
 
-public sealed class RdbSnapshotLoader {
+public sealed class RdbSnapshotLoader
+{
     private readonly IKeyValueStore _store;
     private readonly RdbSnapshotReader _reader;
+    private readonly IListStore? _listStore;
 
     public RdbSnapshotLoader(
         IKeyValueStore store,
-        RdbSnapshotReader reader) {
+        RdbSnapshotReader reader,
+        IListStore? listStore = null)
+    {
         ArgumentNullException.ThrowIfNull(
             store);
 
@@ -18,22 +24,24 @@ public sealed class RdbSnapshotLoader {
 
         _store = store;
         _reader = reader;
+        _listStore = listStore;
     }
 
     public int Load(
         Stream stream,
-        DateTimeOffset now) {
-        RdbLoadResult result =
-            LoadWithMetadata(
-                stream,
-                now);
-
-        return result.RecordsLoaded;
+        DateTimeOffset now)
+    {
+        return LoadWithMetadata(
+            stream,
+            now,
+            replaceExisting: false).RecordsLoaded;
     }
 
     public RdbLoadResult LoadWithMetadata(
         Stream stream,
-        DateTimeOffset now) {
+        DateTimeOffset now,
+        bool replaceExisting = false)
+    {
         ArgumentNullException.ThrowIfNull(
             stream);
 
@@ -42,15 +50,61 @@ public sealed class RdbSnapshotLoader {
                 stream,
                 now);
 
-        foreach (var record in snapshot.Records) {
+        if (replaceExisting)
+        {
+            if (_store is IResettableKeyValueStore resettableStore)
+            {
+                resettableStore.Clear();
+            }
+
+            if (_listStore is IResettableListStore resettableListStore)
+            {
+                resettableListStore.Clear();
+            }
+        }
+
+        int recordsLoaded = 0;
+
+        foreach (var record in snapshot.Records)
+        {
+            if (record.Type == RdbRecordType.List)
+            {
+                if (_listStore is null)
+                {
+                    throw new InvalidOperationException(
+                        "The snapshot contains a list but no list store is configured.");
+                }
+
+                _store.Remove(record.Key);
+
+                _listStore.Remove(record.Key);
+
+                IReadOnlyList<string> values =
+                    record.ListValues ?? [];
+
+                if (values.Count > 0)
+                {
+                    _listStore.PushRight(
+                        record.Key,
+                        values);
+                }
+
+                recordsLoaded++;
+                continue;
+            }
+
+            _listStore?.Remove(record.Key);
+
             _store.Set(
                 record.Key,
                 record.Value,
                 record.ExpiresAt);
+
+            recordsLoaded++;
         }
 
         return new RdbLoadResult(
-            snapshot.Records.Count,
+            recordsLoaded,
             snapshot.Header.AofOffset);
     }
 }

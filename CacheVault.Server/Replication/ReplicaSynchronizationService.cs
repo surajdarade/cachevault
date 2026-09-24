@@ -28,9 +28,10 @@ public sealed class ReplicaSynchronizationService {
     private readonly RdbSnapshotLoader _snapshotLoader;
 
     private readonly CommandDispatcher _commandDispatcher;
+    private readonly IReplicationState _replicationState;
+    private readonly ReplicaSynchronizationStatus _status;
 
     private string _replicationId = "?";
-
     private long _replicationOffset = -1;
 
     public ReplicaSynchronizationService(
@@ -40,7 +41,9 @@ public sealed class ReplicaSynchronizationService {
         IRespParser respParser,
         IRespSerializer respSerializer,
         RdbSnapshotLoader snapshotLoader,
-        CommandDispatcher commandDispatcher) {
+        CommandDispatcher commandDispatcher,
+        IReplicationState replicationState,
+        ReplicaSynchronizationStatus status) {
         ArgumentNullException.ThrowIfNull(
             options);
 
@@ -62,6 +65,12 @@ public sealed class ReplicaSynchronizationService {
         ArgumentNullException.ThrowIfNull(
             commandDispatcher);
 
+        ArgumentNullException.ThrowIfNull(
+            replicationState);
+
+        ArgumentNullException.ThrowIfNull(
+            status);
+
         _options =
             options;
 
@@ -82,6 +91,17 @@ public sealed class ReplicaSynchronizationService {
 
         _commandDispatcher =
             commandDispatcher;
+
+        _replicationState =
+            replicationState;
+
+        _status =
+            status;
+
+        _replicationId =
+            replicationState.ReplicationId;
+
+        _replicationOffset = -1;
     }
 
     public long ReplicationOffset =>
@@ -89,6 +109,42 @@ public sealed class ReplicaSynchronizationService {
 
     public string ReplicationId =>
         _replicationId;
+
+    public async Task RunAsync(
+        CancellationToken cancellationToken = default)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await SynchronizeAsync(
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception)
+            {
+                _status.Disconnected();
+
+                try
+                {
+                    await Task.Delay(
+                        TimeSpan.FromSeconds(1),
+                        cancellationToken);
+                }
+                catch (OperationCanceledException)
+                    when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+        }
+
+        _status.Disconnected();
+    }
 
     public async Task SynchronizeAsync(
         CancellationToken cancellationToken = default) {
@@ -128,6 +184,8 @@ public sealed class ReplicaSynchronizationService {
             stream,
             reader,
             cancellationToken);
+
+        _status.Disconnected();
     }
 
     private async Task SendListeningPortAsync(
@@ -202,7 +260,12 @@ public sealed class ReplicaSynchronizationService {
                 cancellationToken);
 
         if (_protocolParser.IsContinue(
-                response)) {
+                response))
+        {
+            _status.ConnectedToMaster(
+                _replicationId,
+                _replicationOffset);
+
             return;
         }
 
@@ -216,6 +279,14 @@ public sealed class ReplicaSynchronizationService {
         _replicationOffset =
             fullResync.ReplicationOffset;
 
+        _replicationState.SetReplicationState(
+            _replicationId,
+            _replicationOffset);
+
+        _status.ConnectedToMaster(
+            _replicationId,
+            _replicationOffset);
+
         byte[] snapshot =
             await reader.ReadBulkPayloadAsync(
                 stream,
@@ -228,7 +299,8 @@ public sealed class ReplicaSynchronizationService {
 
         _snapshotLoader.LoadWithMetadata(
             snapshotStream,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            replaceExisting: true);
     }
 
     private async Task ConsumeReplicationStreamAsync(
@@ -283,6 +355,13 @@ public sealed class ReplicaSynchronizationService {
                     _replicationOffset +
                     _respSerializer.Serialize(
                         command).LongLength);
+
+            _replicationState.SetReplicationState(
+                _replicationId,
+                _replicationOffset);
+
+            _status.UpdateOffset(
+                _replicationOffset);
         }
     }
 

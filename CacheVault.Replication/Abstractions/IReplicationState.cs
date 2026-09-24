@@ -11,5 +11,9 @@ public interface IReplicationState {
 
     void AdvanceReplicationOffset(long bytes);
 
+    void SetReplicationState(
+        string replicationId,
+        long replicationOffset);
+
     void Acknowledge(long offset);
 }

@@ -2,6 +2,7 @@
 
 public enum RdbOpcode : byte {
     StringValue = 0x00,
+    ListValue = 0x02,
 
     ExpireMilliseconds = 0xFC,
 

@@ -58,8 +58,7 @@ public sealed class RdbSnapshotReader {
             RdbRecord record =
                 ReadRecordWithOpcode(
                     stream,
-                    opcode,
-                    now);
+                    opcode);
 
             records.Add(
                 record);
@@ -68,71 +67,101 @@ public sealed class RdbSnapshotReader {
 
     private static RdbRecord ReadRecordWithOpcode(
         Stream stream,
-        RdbOpcode opcode,
-        DateTimeOffset now) {
-        DateTimeOffset? expiresAt = null;
-
-        if (opcode ==
-            RdbOpcode.ExpireMilliseconds) {
-            long milliseconds =
-                ReadInt64(
-                    stream);
-
-            if (milliseconds <= 0) {
-                throw new FormatException(
-                    "RDB expiration must be greater than zero.");
-            }
-
-            try {
-                expiresAt =
-                    DateTimeOffset.FromUnixTimeMilliseconds(
-                        milliseconds);
-            }
-            catch (ArgumentOutOfRangeException) {
-                throw new FormatException(
-                    "RDB expiration timestamp is outside the supported range.");
-            }
-
-            opcode =
-                ReadNextRecordOpcode(
-                    stream);
-        }
-        else if (opcode ==
-                 RdbOpcode.ExpireSeconds) {
-            long seconds =
-                ReadInt64(
-                    stream);
-
-            if (seconds <= 0) {
-                throw new FormatException(
-                    "RDB expiration must be greater than zero.");
-            }
-
-            try {
-                expiresAt =
-                    DateTimeOffset.FromUnixTimeSeconds(
-                        seconds);
-            }
-            catch (ArgumentOutOfRangeException) {
-                throw new FormatException(
-                    "RDB expiration timestamp is outside the supported range.");
-            }
-
-            opcode =
-                ReadNextRecordOpcode(
-                    stream);
+        RdbOpcode opcode) {
+        if (opcode == RdbOpcode.ExpireMilliseconds ||
+            opcode == RdbOpcode.ExpireSeconds) {
+            return ReadRecordWithExpiration(
+                stream,
+                opcode);
         }
 
-        if (opcode !=
-            RdbOpcode.StringValue) {
+        if (opcode == RdbOpcode.StringValue) {
+            return new RdbRecord(
+                RdbStringDecoder.ReadString(stream),
+                RdbStringDecoder.ReadString(stream),
+                null);
+        }
+
+        if (opcode == RdbOpcode.ListValue) {
+            return ReadListRecord(stream);
+        }
+
+        throw new FormatException(
+            $"Unsupported RDB record opcode: " +
+            $"0x{(byte)opcode:X2}.");
+    }
+
+    private static RdbRecord ReadRecordWithExpiration(
+        Stream stream,
+        RdbOpcode opcode) {
+        long timestamp =
+            ReadInt64(stream);
+
+        DateTimeOffset expiresAt;
+
+        try {
+            expiresAt =
+                opcode == RdbOpcode.ExpireMilliseconds
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(
+                        timestamp)
+                    : DateTimeOffset.FromUnixTimeSeconds(
+                        timestamp);
+        }
+        catch (ArgumentOutOfRangeException) {
+            throw new FormatException(
+                "RDB expiration timestamp is outside the supported range.");
+        }
+
+        RdbOpcode valueOpcode =
+            ReadNextRecordOpcode(stream);
+
+        /*
+         * Expiration metadata currently applies only to
+         * string records.
+         *
+         * A list opcode or any other opcode cannot legally
+         * follow expiration metadata. Report it as an
+         * unsupported RDB record opcode rather than treating
+         * it as a generic expiration/type error.
+         */
+        if (valueOpcode != RdbOpcode.StringValue) {
             throw new FormatException(
                 $"Unsupported RDB record opcode: " +
-                $"0x{(byte)opcode:X2}.");
+                $"0x{(byte)valueOpcode:X2}.");
         }
 
-        return ReadStringRecord(
-            stream,
+        return new RdbRecord(
+            RdbStringDecoder.ReadString(stream),
+            RdbStringDecoder.ReadString(stream),
             expiresAt);
+    }
+
+    private static RdbRecord ReadListRecord(
+        Stream stream) {
+        string key =
+            RdbStringDecoder.ReadString(stream);
+
+        uint count =
+            RdbLengthDecoder.ReadLength(stream);
+
+        if (count > int.MaxValue) {
+            throw new FormatException(
+                "RDB list contains too many elements.");
+        }
+
+        var values =
+            new string[(int)count];
+
+        for (int index = 0;
+             index < values.Length;
+             index++) {
+            values[index] =
+                RdbStringDecoder.ReadString(stream);
+        }
+
+        return RdbRecord.CreateList(
+            key,
+            values);
     }
 
     private static RdbOpcode ReadNextRecordOpcode(
@@ -146,23 +175,6 @@ public sealed class RdbSnapshotReader {
         }
 
         return (RdbOpcode)opcodeValue;
-    }
-
-    private static RdbRecord ReadStringRecord(
-        Stream stream,
-        DateTimeOffset? expiresAt) {
-        string key =
-            RdbStringDecoder.ReadString(
-                stream);
-
-        string value =
-            RdbStringDecoder.ReadString(
-                stream);
-
-        return new RdbRecord(
-            key,
-            value,
-            expiresAt);
     }
 
     private static long ReadInt64(

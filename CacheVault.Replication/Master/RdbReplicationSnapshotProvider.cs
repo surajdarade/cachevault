@@ -1,4 +1,5 @@
 ﻿using CacheVault.Core.Abstractions;
+using CacheVault.Core.Lists;
 using CacheVault.Persistence.Rdb.Writing;
 using CacheVault.Replication.Abstractions;
 
@@ -9,13 +10,15 @@ public sealed class RdbReplicationSnapshotProvider :
     private readonly RdbSnapshotWriter _snapshotWriter;
 
     public RdbReplicationSnapshotProvider(
-        IKeyValueStoreSnapshot snapshotStore) {
+        IKeyValueStoreSnapshot snapshotStore,
+        IListStoreSnapshot? listSnapshotStore = null) {
         ArgumentNullException.ThrowIfNull(
             snapshotStore);
 
         _snapshotWriter =
             new RdbSnapshotWriter(
-                snapshotStore);
+                snapshotStore,
+                listSnapshotStore);
     }
 
     public async ValueTask WriteSnapshotAsync(

@@ -1,15 +1,18 @@
-﻿namespace CacheVault.Persistence.Rdb.Format;
+namespace CacheVault.Persistence.Rdb.Format;
 
-public static class RdbRecordReader {
+public static class RdbRecordReader
+{
     public static RdbRecord ReadRecord(
         Stream stream,
-        DateTimeOffset now) {
+        DateTimeOffset now)
+    {
         ArgumentNullException.ThrowIfNull(stream);
 
         int firstByte =
             stream.ReadByte();
 
-        if (firstByte < 0) {
+        if (firstByte < 0)
+        {
             throw new EndOfStreamException(
                 "Unexpected end of RDB stream.");
         }
@@ -20,16 +23,19 @@ public static class RdbRecordReader {
         DateTimeOffset? expiresAt = null;
 
         if (firstOpcode ==
-            RdbOpcode.ExpireMilliseconds) {
+            RdbOpcode.ExpireMilliseconds)
+        {
             long milliseconds =
                 ReadInt64(stream);
 
-            try {
+            try
+            {
                 expiresAt =
                     DateTimeOffset.FromUnixTimeMilliseconds(
                         milliseconds);
             }
-            catch (ArgumentOutOfRangeException exception) {
+            catch (ArgumentOutOfRangeException exception)
+            {
                 throw new FormatException(
                     "RDB expiration timestamp is invalid.",
                     exception);
@@ -39,16 +45,19 @@ public static class RdbRecordReader {
                 ReadNextOpcode(stream);
         }
         else if (firstOpcode ==
-                 RdbOpcode.ExpireSeconds) {
+                 RdbOpcode.ExpireSeconds)
+        {
             long seconds =
                 ReadInt64(stream);
 
-            try {
+            try
+            {
                 expiresAt =
                     DateTimeOffset.FromUnixTimeSeconds(
                         seconds);
             }
-            catch (ArgumentOutOfRangeException exception) {
+            catch (ArgumentOutOfRangeException exception)
+            {
                 throw new FormatException(
                     "RDB expiration timestamp is invalid.",
                     exception);
@@ -58,8 +67,21 @@ public static class RdbRecordReader {
                 ReadNextOpcode(stream);
         }
 
+        if (firstOpcode ==
+            RdbOpcode.ListValue)
+        {
+            if (expiresAt.HasValue)
+            {
+                throw new FormatException(
+                    "List records cannot contain expiration metadata.");
+            }
+
+            return ReadListRecord(stream);
+        }
+
         if (firstOpcode !=
-            RdbOpcode.StringValue) {
+            RdbOpcode.StringValue)
+        {
             throw new FormatException(
                 $"Unsupported RDB record opcode: " +
                 $"0x{(byte)firstOpcode:X2}.");
@@ -79,12 +101,48 @@ public static class RdbRecordReader {
             expiresAt);
     }
 
+    private static RdbRecord ReadListRecord(
+        Stream stream)
+    {
+        string key =
+            RdbStringDecoder.ReadString(
+                stream);
+
+        uint count =
+            RdbLengthDecoder.ReadLength(
+                stream);
+
+        if (count > int.MaxValue)
+        {
+            throw new FormatException(
+                "RDB list contains too many elements.");
+        }
+
+        var values =
+            new string[(int)count];
+
+        for (int index = 0;
+             index < values.Length;
+             index++)
+        {
+            values[index] =
+                RdbStringDecoder.ReadString(
+                    stream);
+        }
+
+        return RdbRecord.CreateList(
+            key,
+            values);
+    }
+
     private static RdbOpcode ReadNextOpcode(
-        Stream stream) {
+        Stream stream)
+    {
         int value =
             stream.ReadByte();
 
-        if (value < 0) {
+        if (value < 0)
+        {
             throw new EndOfStreamException(
                 "Unexpected end of RDB stream.");
         }
@@ -93,7 +151,8 @@ public static class RdbRecordReader {
     }
 
     private static long ReadInt64(
-        Stream stream) {
+        Stream stream)
+    {
         Span<byte> buffer =
             stackalloc byte[sizeof(long)];
 
@@ -117,15 +176,18 @@ public static class RdbRecordReader {
 
     private static void ReadExactly(
         Stream stream,
-        Span<byte> buffer) {
+        Span<byte> buffer)
+    {
         int totalRead = 0;
 
-        while (totalRead < buffer.Length) {
+        while (totalRead < buffer.Length)
+        {
             int bytesRead =
                 stream.Read(
                     buffer[totalRead..]);
 
-            if (bytesRead == 0) {
+            if (bytesRead == 0)
+            {
                 throw new EndOfStreamException(
                     "Unexpected end of RDB stream.");
             }

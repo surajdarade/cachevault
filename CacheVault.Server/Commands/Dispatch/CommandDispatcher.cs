@@ -13,7 +13,9 @@ public sealed class CommandDispatcher {
             "EXEC",
             "DISCARD",
             "WATCH",
-            "UNWATCH"
+            "UNWATCH",
+            "SUBSCRIBE",
+            "UNSUBSCRIBE"
         };
 
     private static readonly HashSet<string> PersistentCommands =
@@ -21,7 +23,11 @@ public sealed class CommandDispatcher {
         {
             "SET",
             "DEL",
-            "INCR"
+            "INCR",
+            "LPUSH",
+            "RPUSH",
+            "LPOP",
+            "RPOP"
         };
 
     private IReadOnlyDictionary<string, IRedisCommand> _commands =
@@ -31,6 +37,17 @@ public sealed class CommandDispatcher {
     private ICommandPersistence? _persistence;
 
     private IReplicationManager? _replication;
+
+    private readonly ICommandExecutionGate? _executionGate;
+    private readonly bool _isReplica;
+
+    public CommandDispatcher(
+        ICommandExecutionGate? executionGate = null,
+        bool isReplica = false)
+    {
+        _executionGate = executionGate;
+        _isReplica = isReplica;
+    }
 
     public void RegisterPersistence(
         ICommandPersistence persistence) {
@@ -76,7 +93,37 @@ public sealed class CommandDispatcher {
 
     public async ValueTask<RespValue> DispatchAsync(
         CommandContext context,
-        RespArray request) {
+        RespArray request)
+    {
+        ArgumentNullException.ThrowIfNull(
+            context);
+
+        if (_executionGate is null)
+        {
+            return await DispatchCoreAsync(
+                context,
+                request);
+        }
+
+        await _executionGate.WaitAsync(
+            context.CancellationToken);
+
+        try
+        {
+            return await DispatchCoreAsync(
+                context,
+                request);
+        }
+        finally
+        {
+            _executionGate.Release();
+        }
+    }
+
+    private async ValueTask<RespValue> DispatchCoreAsync(
+        CommandContext context,
+        RespArray request)
+    {
         ArgumentNullException.ThrowIfNull(
             context);
 
@@ -106,6 +153,20 @@ public sealed class CommandDispatcher {
             request.Values.Count == 1
                 ? Array.Empty<RespValue>()
                 : request.Values.Skip(1).ToArray();
+
+        if (_isReplica &&
+            !context.IsReplay &&
+            IsWriteCommand(command.Name))
+        {
+            throw new CommandArgumentException(
+                "READONLY You can't write against a read only replica.");
+        }
+
+        if (context.Session.IsSubscribed &&
+            !IsAllowedInSubscriptionMode(command.Name)) {
+            throw new CommandArgumentException(
+                "ERR only SUBSCRIBE / UNSUBSCRIBE / PING allowed in this context");
+        }
 
         if (context.Session.IsInTransaction &&
             !TransactionControlCommands.Contains(command.Name)) {
@@ -152,9 +213,18 @@ public sealed class CommandDispatcher {
 
         if (!_commands.TryGetValue(
                 queuedCommand.Name,
-                out IRedisCommand? command)) {
+                out IRedisCommand? command))
+        {
             throw new CommandArgumentException(
                 $"ERR unknown command '{queuedCommand.Name.ToLowerInvariant()}'");
+        }
+
+        if (_isReplica &&
+            !context.IsReplay &&
+            IsWriteCommand(command.Name))
+        {
+            throw new CommandArgumentException(
+                "READONLY You can't write against a read only replica.");
         }
 
         RespValue result =
@@ -179,6 +249,33 @@ public sealed class CommandDispatcher {
         }
 
         return result;
+    }
+
+    private static bool IsWriteCommand(
+        string commandName)
+    {
+        return commandName.Equals("SET", StringComparison.OrdinalIgnoreCase)
+            || commandName.Equals("DEL", StringComparison.OrdinalIgnoreCase)
+            || commandName.Equals("INCR", StringComparison.OrdinalIgnoreCase)
+            || commandName.Equals("LPUSH", StringComparison.OrdinalIgnoreCase)
+            || commandName.Equals("RPUSH", StringComparison.OrdinalIgnoreCase)
+            || commandName.Equals("LPOP", StringComparison.OrdinalIgnoreCase)
+            || commandName.Equals("RPOP", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAllowedInSubscriptionMode(
+        string commandName) {
+        return commandName.Equals(
+                   "SUBSCRIBE",
+                   StringComparison.OrdinalIgnoreCase)
+               ||
+               commandName.Equals(
+                   "UNSUBSCRIBE",
+                   StringComparison.OrdinalIgnoreCase)
+               ||
+               commandName.Equals(
+                   "PING",
+                   StringComparison.OrdinalIgnoreCase);
     }
 
     private async ValueTask PersistAsync(

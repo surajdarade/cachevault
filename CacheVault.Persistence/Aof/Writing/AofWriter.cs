@@ -58,6 +58,36 @@ public sealed class AofWriter : IAsyncDisposable {
         }
     }
 
+    public async ValueTask<long> GetLengthAsync(
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+
+        await _writeLock.WaitAsync(
+            cancellationToken);
+
+        try
+        {
+            ThrowIfDisposed();
+
+            if (_stream is null)
+            {
+                return File.Exists(_filePath)
+                    ? new FileInfo(_filePath).Length
+                    : 0;
+            }
+
+            await _stream.FlushAsync(
+                cancellationToken);
+
+            return _stream.Length;
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
     public async ValueTask DisposeAsync() {
         if (_disposed) {
             return;

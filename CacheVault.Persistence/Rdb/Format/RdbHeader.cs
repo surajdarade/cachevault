@@ -5,5 +5,5 @@ public sealed record RdbHeader(
     long AofOffset = 0) {
     public const string Magic = "CVDB";
 
-    public const ushort CurrentVersion = 3;
+    public const ushort CurrentVersion = 4;
 }
