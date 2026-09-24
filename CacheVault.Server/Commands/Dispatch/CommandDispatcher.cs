@@ -1,4 +1,5 @@
 ﻿using CacheVault.Protocol.Resp.Types;
+using CacheVault.Replication.Abstractions;
 using CacheVault.Server.Commands.Abstractions;
 using CacheVault.Server.Networking.Connections;
 
@@ -29,6 +30,8 @@ public sealed class CommandDispatcher {
 
     private ICommandPersistence? _persistence;
 
+    private IReplicationManager? _replication;
+
     public void RegisterPersistence(
         ICommandPersistence persistence) {
         ArgumentNullException.ThrowIfNull(
@@ -40,6 +43,19 @@ public sealed class CommandDispatcher {
         }
 
         _persistence = persistence;
+    }
+
+    public void RegisterReplication(
+        IReplicationManager replication) {
+        ArgumentNullException.ThrowIfNull(
+            replication);
+
+        if (_replication is not null) {
+            throw new InvalidOperationException(
+                "Command replication has already been registered.");
+        }
+
+        _replication = replication;
     }
 
     public void RegisterCommands(
@@ -114,6 +130,14 @@ public sealed class CommandDispatcher {
                 context.CancellationToken);
         }
 
+        if (!context.IsReplay &&
+            ShouldReplicate(command.Name)) {
+            await ReplicateAsync(
+                command.Name,
+                arguments,
+                context.CancellationToken);
+        }
+
         return result;
     }
 
@@ -146,6 +170,14 @@ public sealed class CommandDispatcher {
                 context.CancellationToken);
         }
 
+        if (!context.IsReplay &&
+            ShouldReplicate(command.Name)) {
+            await ReplicateAsync(
+                command.Name,
+                queuedCommand.Arguments,
+                context.CancellationToken);
+        }
+
         return result;
     }
 
@@ -166,7 +198,30 @@ public sealed class CommandDispatcher {
             cancellationToken);
     }
 
+    private async ValueTask ReplicateAsync(
+        string commandName,
+        IReadOnlyList<RespValue> arguments,
+        CancellationToken cancellationToken) {
+        if (_replication is null) {
+            return;
+        }
+
+        string[] stringArguments =
+            ConvertArguments(arguments);
+
+        await _replication.ReplicateAsync(
+            commandName,
+            stringArguments,
+            cancellationToken);
+    }
+
     private static bool ShouldPersist(
+        string commandName) {
+        return PersistentCommands.Contains(
+            commandName);
+    }
+
+    private static bool ShouldReplicate(
         string commandName) {
         return PersistentCommands.Contains(
             commandName);

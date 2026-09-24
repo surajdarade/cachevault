@@ -7,10 +7,11 @@ using CacheVault.Server.Recovery;
 
 namespace CacheVault.Server.Networking.Server;
 
-public sealed class RedisTcpServer : IRedisTcpServer {
+public sealed class RedisTcpServer :
+    IRedisTcpServer {
     private readonly ServerOptions _options;
 
-    private readonly IClientConnectionHandler _connectionHandler;
+    private readonly IConnectionHandler _connectionHandler;
 
     private readonly RecoveryCoordinator _recoveryCoordinator;
 
@@ -26,7 +27,7 @@ public sealed class RedisTcpServer : IRedisTcpServer {
 
     public RedisTcpServer(
         ServerOptions options,
-        IClientConnectionHandler connectionHandler,
+        IConnectionHandler connectionHandler,
         RecoveryCoordinator recoveryCoordinator) {
         ArgumentNullException.ThrowIfNull(
             options);

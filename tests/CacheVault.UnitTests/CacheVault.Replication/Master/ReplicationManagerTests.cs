@@ -373,6 +373,159 @@ public sealed class ReplicationManagerTests {
             fixture.Broadcaster.BroadcastedEntries);
     }
 
+    [Fact]
+    public async Task ReplicateAsync_ConcurrentCalls_ShouldProduceContiguousOffsets() {
+        var fixture =
+            CreateFixture();
+
+        const int commandCount = 100;
+
+        Task[] tasks =
+            Enumerable.Range(
+                    0,
+                    commandCount)
+                .Select(
+                    index =>
+                        fixture.Manager.ReplicateAsync(
+                            "SET",
+                            [
+                                $"key-{index}",
+                                $"value-{index}"
+                            ]).AsTask())
+                .ToArray();
+
+        await Task.WhenAll(
+            tasks);
+
+        Assert.Equal(
+            commandCount,
+            fixture.Broadcaster.BroadcastedEntries.Count);
+
+        Assert.Equal(
+            fixture.Manager.ReplicationOffset,
+            fixture.Backlog.EndOffset);
+
+        Assert.Equal(
+            fixture.Manager.ReplicationOffset,
+            fixture.Broadcaster.BroadcastedEntries
+                .Max(
+                    entry =>
+                        entry.EndOffset));
+
+        var orderedEntries =
+            fixture.Broadcaster.BroadcastedEntries
+                .OrderBy(
+                    entry =>
+                        entry.StartOffset)
+                .ToArray();
+
+        long expectedOffset = 0;
+
+        foreach (ReplicationEntry entry in orderedEntries)
+        {
+            Assert.Equal(
+                expectedOffset,
+                entry.StartOffset);
+
+            Assert.Equal(
+                entry.Length,
+                entry.EndOffset - entry.StartOffset);
+
+            expectedOffset =
+                entry.EndOffset;
+        }
+
+        Assert.Equal(
+            fixture.Manager.ReplicationOffset,
+            expectedOffset);
+    }
+
+    [Fact]
+    public async Task ReplicateAsync_CancelledWhileWaitingForPublication_ShouldNotPublish() {
+        var fixture =
+            CreateFixture();
+
+        var blockingBroadcaster =
+            new BlockingReplicationBroadcaster();
+
+        var manager =
+            new ReplicationManager(
+                fixture.State,
+                CreateEncoder(),
+                fixture.Backlog,
+                blockingBroadcaster);
+
+        Task firstReplication =
+            manager.ReplicateAsync(
+                "SET",
+                ["first", "one"])
+            .AsTask();
+
+        await blockingBroadcaster
+            .FirstBroadcastStarted
+            .WaitAsync(TimeSpan.FromSeconds(5));
+
+        long offsetAfterFirstCommand =
+            manager.ReplicationOffset;
+
+        int broadcastCountAfterFirstCommand =
+            blockingBroadcaster
+                .BroadcastedEntries
+                .Count;
+
+        using var cancellationTokenSource =
+            new CancellationTokenSource();
+
+        Task secondReplication =
+            manager.ReplicateAsync(
+                "SET",
+                ["second", "two"],
+                cancellationTokenSource.Token)
+            .AsTask();
+
+        cancellationTokenSource.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            async () =>
+                await secondReplication);
+
+        Assert.Equal(
+            offsetAfterFirstCommand,
+            manager.ReplicationOffset);
+
+        Assert.Equal(
+            broadcastCountAfterFirstCommand,
+            blockingBroadcaster
+                .BroadcastedEntries
+                .Count);
+
+        Assert.Equal(
+            offsetAfterFirstCommand,
+            fixture.Backlog.EndOffset);
+
+        blockingBroadcaster.ReleaseFirstBroadcast();
+
+        await firstReplication.WaitAsync(
+            TimeSpan.FromSeconds(5));
+
+        Assert.Single(
+            blockingBroadcaster.BroadcastedEntries);
+
+        string broadcastData =
+            Encoding.UTF8.GetString(
+                blockingBroadcaster
+                    .BroadcastedEntries[0]
+                    .Data);
+
+        Assert.Contains(
+            "first",
+            broadcastData);
+
+        Assert.DoesNotContain(
+            "second",
+            broadcastData);
+    }
+
     private static TestFixture CreateFixture() {
         var state =
             new ReplicationState();
@@ -387,7 +540,7 @@ public sealed class ReplicationManagerTests {
         var broadcaster =
             new TestReplicationBroadcaster();
 
-        var manager =
+        var manager =   
             new ReplicationManager(
                 state,
                 encoder,
@@ -432,6 +585,62 @@ public sealed class ReplicationManagerTests {
         public ReplicationBacklog Backlog { get; }
 
         public TestReplicationBroadcaster Broadcaster { get; }
+    }
+
+    private sealed class BlockingReplicationBroadcaster :
+    IReplicationBroadcaster {
+        private readonly TaskCompletionSource<bool>
+            _firstBroadcastStarted =
+                new(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private readonly TaskCompletionSource<bool>
+            _releaseFirstBroadcast =
+                new(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private readonly List<ReplicationEntry>
+            _broadcastedEntries = [];
+
+        private int _broadcastCount;
+
+        public Task FirstBroadcastStarted =>
+            _firstBroadcastStarted.Task;
+
+        public IReadOnlyList<ReplicationEntry>
+            BroadcastedEntries =>
+            _broadcastedEntries;
+
+        public async ValueTask BroadcastAsync(
+            ReplicationEntry entry,
+            CancellationToken cancellationToken = default) {
+            ArgumentNullException.ThrowIfNull(entry);
+
+            int broadcastNumber =
+                Interlocked.Increment(
+                    ref _broadcastCount);
+
+            _broadcastedEntries.Add(
+                entry);
+
+            if (broadcastNumber == 1) {
+                _firstBroadcastStarted.TrySetResult(
+                    true);
+
+                await _releaseFirstBroadcast.Task;
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                return;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        public void ReleaseFirstBroadcast() {
+            _releaseFirstBroadcast.TrySetResult(
+                true);
+        }
     }
 
     private sealed class TestReplicationBroadcaster :

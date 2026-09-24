@@ -29,12 +29,9 @@ public sealed class FullResynchronizationCoordinator :
             backlog);
 
         _connection = connection;
-        _snapshotProvider =
-            snapshotProvider;
-        _replicationState =
-            replicationState;
-        _backlog =
-            backlog;
+        _snapshotProvider = snapshotProvider;
+        _replicationState = replicationState;
+        _backlog = backlog;
     }
 
     public async ValueTask ExecuteAsync(
@@ -50,10 +47,6 @@ public sealed class FullResynchronizationCoordinator :
         FullResynchronizationContext context =
             CaptureSynchronizationContext();
 
-        await SendFullResyncHeaderAsync(
-            context,
-            cancellationToken);
-
         await using var snapshotStream =
             new MemoryStream();
 
@@ -62,6 +55,14 @@ public sealed class FullResynchronizationCoordinator :
             cancellationToken);
 
         snapshotStream.Position = 0;
+
+        await SendFullResyncHeaderAsync(
+            context,
+            cancellationToken);
+
+        await SendSnapshotHeaderAsync(
+            snapshotStream.Length,
+            cancellationToken);
 
         await SendSnapshotAsync(
             snapshotStream,
@@ -92,6 +93,23 @@ public sealed class FullResynchronizationCoordinator :
         byte[] data =
             Encoding.UTF8.GetBytes(
                 $"+{response}\r\n");
+
+        await _connection.WriteAsync(
+            data,
+            cancellationToken);
+    }
+
+    private async ValueTask SendSnapshotHeaderAsync(
+        long snapshotLength,
+        CancellationToken cancellationToken) {
+        if (snapshotLength < 0) {
+            throw new InvalidOperationException(
+                "The replication snapshot length cannot be negative.");
+        }
+
+        byte[] data =
+            Encoding.ASCII.GetBytes(
+                $"${snapshotLength}\r\n");
 
         await _connection.WriteAsync(
             data,

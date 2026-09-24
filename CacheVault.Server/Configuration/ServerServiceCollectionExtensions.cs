@@ -8,6 +8,10 @@ using CacheVault.Persistence.Rdb.Reading;
 using CacheVault.Protocol.Resp.Abstractions;
 using CacheVault.Protocol.Resp.Parsing;
 using CacheVault.Protocol.Resp.Serialization;
+using CacheVault.Replication.Abstractions;
+using CacheVault.Replication.Master;
+using CacheVault.Replication.Protocol;
+using CacheVault.Replication.State;
 using CacheVault.Server.Commands.Abstractions;
 using CacheVault.Server.Commands.Dispatch;
 using CacheVault.Server.Commands.Persistence;
@@ -21,6 +25,9 @@ using Microsoft.Extensions.DependencyInjection;
 namespace CacheVault.Server.Configuration;
 
 public static class ServerServiceCollectionExtensions {
+    private const long ReplicationBacklogCapacity =
+        64L * 1024L * 1024L;
+
     public static IServiceCollection AddCacheVaultServer(
         this IServiceCollection services,
         ServerOptions options) {
@@ -50,13 +57,58 @@ public static class ServerServiceCollectionExtensions {
             RespStreamReaderFactory>();
 
         services.AddSingleton<
-            IKeyValueStore,
             InMemoryKeyValueStore>();
+
+        services.AddSingleton<
+            IKeyValueStore>(
+            serviceProvider =>
+                serviceProvider.GetRequiredService<
+                    InMemoryKeyValueStore>());
+
+        services.AddSingleton<
+            IKeyValueStoreSnapshot>(
+            serviceProvider =>
+                serviceProvider.GetRequiredService<
+                    InMemoryKeyValueStore>());
+
+        services.AddSingleton<
+            IReplicationState,
+            ReplicationState>();
+
+        services.AddSingleton<
+            IReplicationCommandEncoder,
+            RespReplicationCommandEncoder>();
+
+        services.AddSingleton<
+            IReplicationBacklog>(
+            new ReplicationBacklog(
+                ReplicationBacklogCapacity));
+
+        services.AddSingleton<
+            IReplicaConnectionRegistry,
+            ReplicaConnectionRegistry>();
+
+        services.AddSingleton<
+            IReplicationBroadcaster,
+            ReplicationBroadcaster>();
+
+        services.AddSingleton<
+            IReplicationManager,
+            ReplicationManager>();
+
+        services.AddSingleton<
+            IReplicationProtocolParser,
+            RespReplicationProtocolParser>();
+
+        services.AddSingleton<
+            IReplicationSnapshotProvider,
+            RdbReplicationSnapshotProvider>();
 
         if (options.EnableAof) {
             services.AddSingleton<
                 AofWriter>(
-                serviceProvider => {
+                serviceProvider =>
+                {
                     IRespSerializer serializer =
                         serviceProvider.GetRequiredService<
                             IRespSerializer>();
@@ -68,7 +120,8 @@ public static class ServerServiceCollectionExtensions {
 
             services.AddSingleton<
                 ICommandPersistence>(
-                serviceProvider => {
+                serviceProvider =>
+                {
                     AofWriter writer =
                         serviceProvider.GetRequiredService<
                             AofWriter>();
@@ -89,7 +142,8 @@ public static class ServerServiceCollectionExtensions {
         }
 
         services.AddSingleton(
-            serviceProvider => {
+            serviceProvider =>
+            {
                 IKeyValueStore store =
                     serviceProvider.GetRequiredService<
                         IKeyValueStore>();
@@ -101,6 +155,10 @@ public static class ServerServiceCollectionExtensions {
                 ICommandPersistence persistence =
                     serviceProvider.GetRequiredService<
                         ICommandPersistence>();
+
+                IReplicationManager replication =
+                    serviceProvider.GetRequiredService<
+                        IReplicationManager>();
 
                 var dispatcher =
                     new CommandDispatcher();
@@ -117,6 +175,9 @@ public static class ServerServiceCollectionExtensions {
                 dispatcher.RegisterPersistence(
                     persistence);
 
+                dispatcher.RegisterReplication(
+                    replication);
+
                 return dispatcher;
             });
 
@@ -124,7 +185,8 @@ public static class ServerServiceCollectionExtensions {
             RdbSnapshotReader>();
 
         services.AddSingleton(
-            serviceProvider => {
+            serviceProvider =>
+            {
                 IKeyValueStore store =
                     serviceProvider.GetRequiredService<
                         IKeyValueStore>();
@@ -142,7 +204,8 @@ public static class ServerServiceCollectionExtensions {
             AofCommandReader>();
 
         services.AddSingleton(
-            serviceProvider => {
+            serviceProvider =>
+            {
                 AofCommandReader reader =
                     serviceProvider.GetRequiredService<
                         AofCommandReader>();
@@ -162,6 +225,13 @@ public static class ServerServiceCollectionExtensions {
         services.AddSingleton<
             IClientConnectionHandler,
             ClientConnectionHandler>();
+
+        services.AddSingleton<
+            ReplicaConnectionHandler>();
+
+        services.AddSingleton<
+            IConnectionHandler,
+            ConnectionHandler>();
 
         services.AddSingleton<
             IRedisTcpServer,

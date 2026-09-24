@@ -7,28 +7,19 @@ using CacheVault.Server.Networking.Abstractions;
 
 namespace CacheVault.Server.Networking.Connections;
 
-public sealed class ClientConnectionHandler : IClientConnectionHandler {
-    private readonly IRespStreamReaderFactory _respStreamReaderFactory;
-
+public sealed class ClientConnectionHandler :
+    IClientConnectionHandler {
     private readonly IRespSerializer _respSerializer;
-
     private readonly CommandDispatcher _commandDispatcher;
 
     public ClientConnectionHandler(
-        IRespStreamReaderFactory respStreamReaderFactory,
         IRespSerializer respSerializer,
         CommandDispatcher commandDispatcher) {
-        ArgumentNullException.ThrowIfNull(
-            respStreamReaderFactory);
-
         ArgumentNullException.ThrowIfNull(
             respSerializer);
 
         ArgumentNullException.ThrowIfNull(
             commandDispatcher);
-
-        _respStreamReaderFactory =
-            respStreamReaderFactory;
 
         _respSerializer =
             respSerializer;
@@ -39,17 +30,24 @@ public sealed class ClientConnectionHandler : IClientConnectionHandler {
 
     public async Task HandleAsync(
         TcpClient client,
+        IRespStreamReader respStreamReader,
+        RespValue? initialMessage,
         CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(client);
-
-        IRespStreamReader respStreamReader =
-            _respStreamReaderFactory.Create();
+        ArgumentNullException.ThrowIfNull(respStreamReader);
 
         using (client)
-        using (NetworkStream stream =
-            client.GetStream()) {
+        using (NetworkStream stream = client.GetStream()) {
             var session =
                 new ClientSession();
+
+            if (initialMessage is not null) {
+                await ProcessMessageAsync(
+                    session,
+                    initialMessage,
+                    stream,
+                    cancellationToken);
+            }
 
             while (!cancellationToken.IsCancellationRequested) {
                 RespValue? request =
@@ -61,46 +59,58 @@ public sealed class ClientConnectionHandler : IClientConnectionHandler {
                     return;
                 }
 
-                if (request is not RespArray command) {
-                    RespValue response =
-                        new RespError(
-                            "ERR expected command array");
-
-                    await WriteResponseAsync(
-                        stream,
-                        response,
-                        cancellationToken);
-
-                    continue;
-                }
-
-                try {
-                    var context =
-                        new CommandContext(
-                            session,
-                            cancellationToken);
-
-                    RespValue response =
-                        await _commandDispatcher.DispatchAsync(
-                            context,
-                            command);
-
-                    await WriteResponseAsync(
-                        stream,
-                        response,
-                        cancellationToken);
-                }
-                catch (CommandArgumentException exception) {
-                    RespValue response =
-                        new RespError(
-                            exception.Message);
-
-                    await WriteResponseAsync(
-                        stream,
-                        response,
-                        cancellationToken);
-                }
+                await ProcessMessageAsync(
+                    session,
+                    request,
+                    stream,
+                    cancellationToken);
             }
+        }
+    }
+
+    private async Task ProcessMessageAsync(
+        ClientSession session,
+        RespValue request,
+        NetworkStream stream,
+        CancellationToken cancellationToken) {
+        if (request is not RespArray command) {
+            RespValue response =
+                new RespError(
+                    "ERR expected command array");
+
+            await WriteResponseAsync(
+                stream,
+                response,
+                cancellationToken);
+
+            return;
+        }
+
+        try {
+            var context =
+                new CommandContext(
+                    session,
+                    cancellationToken);
+
+            RespValue response =
+                await _commandDispatcher.DispatchAsync(
+                    context,
+                    command);
+
+            await WriteResponseAsync(
+                stream,
+                response,
+                cancellationToken);
+        }
+        catch (CommandArgumentException exception) {
+            RespValue response =
+                new RespError(
+                    exception.Message);
+
+            await WriteResponseAsync(
+                stream,
+                response,
+                cancellationToken);
         }
     }
 
@@ -109,7 +119,8 @@ public sealed class ClientConnectionHandler : IClientConnectionHandler {
         RespValue response,
         CancellationToken cancellationToken) {
         byte[] bytes =
-            _respSerializer.Serialize(response);
+            _respSerializer.Serialize(
+                response);
 
         await stream.WriteAsync(
             bytes,

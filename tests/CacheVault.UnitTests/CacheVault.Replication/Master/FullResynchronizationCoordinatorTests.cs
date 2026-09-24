@@ -39,8 +39,53 @@ public sealed class FullResynchronizationCoordinatorTests {
                 transport.WrittenData.ToArray());
 
         Assert.StartsWith(
-            "+FULLRESYNC master-id 100\r\n",
+            "+FULLRESYNC master-id 100\r\n$18\r\n",
             written);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldSendSnapshotAsRespBulkString() {
+        var transport =
+            new TestReplicationTransport();
+
+        var connection =
+            CreateSynchronizingConnection(
+                transport);
+
+        var state =
+            CreateReplicationState();
+
+        var backlog =
+            CreateBacklog();
+
+        byte[] snapshot =
+            "CVDB-test-snapshot"u8.ToArray();
+
+        var coordinator =
+            CreateCoordinator(
+                connection,
+                new TestSnapshotProvider(
+                    snapshot),
+                state,
+                backlog);
+
+        await coordinator.ExecuteAsync();
+
+        byte[] actual =
+            transport.WrittenData.ToArray();
+
+        byte[] header =
+            Encoding.UTF8.GetBytes(
+                "+FULLRESYNC master-id 100\r\n$18\r\n");
+
+        Assert.Equal(
+            header,
+            actual[..header.Length]);
+
+        Assert.Equal(
+            snapshot,
+            actual[
+                header.Length..(header.Length + snapshot.Length)]);
     }
 
     [Fact]
@@ -76,7 +121,7 @@ public sealed class FullResynchronizationCoordinatorTests {
 
         byte[] expectedHeader =
             Encoding.UTF8.GetBytes(
-                "+FULLRESYNC master-id 100\r\n");
+                "+FULLRESYNC master-id 100\r\n$18\r\n");
 
         byte[] actual =
             transport.WrittenData.ToArray();
@@ -93,8 +138,9 @@ public sealed class FullResynchronizationCoordinatorTests {
         Assert.Equal(
             snapshot,
             actual[
-                expectedHeader.Length..(expectedHeader.Length +
-                 snapshot.Length)]);
+                expectedHeader.Length..(
+                    expectedHeader.Length +
+                    snapshot.Length)]);
     }
 
     [Fact]
@@ -139,7 +185,7 @@ public sealed class FullResynchronizationCoordinatorTests {
 
         byte[] header =
             Encoding.UTF8.GetBytes(
-                "+FULLRESYNC master-id 100\r\n");
+                "+FULLRESYNC master-id 100\r\n$4\r\n");
 
         byte[] expected =
             header
@@ -244,7 +290,8 @@ public sealed class FullResynchronizationCoordinatorTests {
             CreateReplicationState();
 
         var backlog =
-            new ReplicationBacklog(5);
+            new ReplicationBacklog(
+                5);
 
         var coordinator =
             CreateCoordinator(
