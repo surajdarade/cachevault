@@ -49,11 +49,14 @@ public class BenchmarkRedisClient : IAsyncDisposable
             request,
             cancellationToken).ConfigureAwait(false);
 
-        return await ReadResponseAsync(
+        RespValue response = await ReadResponseAsync(
             cancellationToken).ConfigureAwait(false);
+
+        ThrowIfServerError(response);
+        return response;
     }
 
-    public async Task SendPipelineAsync(
+    public async Task<IReadOnlyList<RespValue>> SendPipelineAsync(
         byte[] request,
         int responseCount,
         CancellationToken cancellationToken = default)
@@ -62,10 +65,29 @@ public class BenchmarkRedisClient : IAsyncDisposable
             request,
             cancellationToken).ConfigureAwait(false);
 
+        var responses = new List<RespValue>(responseCount);
         for (int index = 0; index < responseCount; index++)
         {
-            await ReadResponseAsync(
-                cancellationToken).ConfigureAwait(false);
+            // Drain every reply before reporting a server error; otherwise the
+            // next operation would read a stale response from this pipeline.
+            responses.Add(await ReadResponseAsync(
+                cancellationToken).ConfigureAwait(false));
+        }
+
+        RespError? firstError = responses.OfType<RespError>().FirstOrDefault();
+        if (firstError is not null)
+        {
+            throw new BenchmarkServerErrorException(firstError.Message);
+        }
+
+        return responses;
+    }
+
+    private static void ThrowIfServerError(RespValue response)
+    {
+        if (response is RespError error)
+        {
+            throw new BenchmarkServerErrorException(error.Message);
         }
     }
 

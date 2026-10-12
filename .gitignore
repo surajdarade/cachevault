@@ -6,3 +6,4 @@ TestResults/
 *.suo
 data/*.rdb
 data/*.aof
+BenchmarkDotNet.Artifacts

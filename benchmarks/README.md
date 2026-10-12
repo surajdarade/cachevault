@@ -94,7 +94,68 @@ dotnet run -c Release --project benchmarks/CacheVault.Benchmarks -- --load --cli
 
 ---
 
-# Benchmark Results
+## RDB Snapshot and Restore Benchmark
+
+Build the benchmark project first, then run a small smoke test:
+
+```powershell
+dotnet build .\benchmarks\CacheVault.Benchmarks\CacheVault.Benchmarks.csproj -c Release
+dotnet run --project .\benchmarks\CacheVault.Benchmarks\CacheVault.Benchmarks.csproj -c Release --no-build -- --rdb-benchmark --keys 1000 --repeats 1
+```
+
+Repeat a dataset size for five trials:
+
+```powershell
+dotnet run --project .\benchmarks\CacheVault.Benchmarks\CacheVault.Benchmarks.csproj -c Release --no-build -- --rdb-benchmark --keys 10000 --repeats 5
+dotnet run --project .\benchmarks\CacheVault.Benchmarks\CacheVault.Benchmarks.csproj -c Release --no-build -- --rdb-benchmark --keys 50000 --repeats 5
+```
+
+Runner semantics and limitations:
+
+- AOF is disabled; RDB is enabled; each string value is 64 UTF-8 bytes. The runner creates `max(1, keys / 1000)` lists with 10 items each.
+- “Shutdown + snapshot” is graceful shutdown through server-task completion, not isolated serialization time.
+- “Restore to ready” is startup through TCP endpoint readiness, not isolated deserialization time.
+- Restore validation samples the first, middle, and last string keys and checks the first list; it does not verify every restored key.
+- The managed-heap delta is an approximate in-process before/after measurement. It is affected by GC and runtime allocations and must not be used as total dataset memory, peak RSS, or per-key memory overhead.
+- Keep every trial, including slow runs. Report the median and individual measurements; do not silently discard outliers.
+
+## Recent Local Measurements
+
+Environment recorded for these runs: Windows 10.0.26200, .NET SDK 10.0.301, .NET runtime 10.0.12, Intel Core Ultra 5 135H reported, 18 logical processors reported, Release build. AOF and RDB were disabled for the RESP load tests unless stated otherwise. These are local results, not a Redis comparison.
+
+### RESP load tests
+
+All load tests below used a 60-second measurement window. Percentile summaries in this table are arithmetic averages of per-run percentiles, not pooled request-level percentiles.
+
+| Workload | Clients / pipeline | Mean throughput | Mean p50 | Mean p95 | Mean p99 | Errors |
+|---|---:|---:|---:|---:|---:|---:|
+| GET-only | 64 clients, 2 runs | 95,028 ops/s | 0.573 ms | 0.876 ms | 2.784 ms | 0 in both runs |
+| Mixed (70% GET, 20% SET, 10% INCR) | 16 clients, 2 runs | 77,022 ops/s | 0.173 ms | 0.271 ms | 0.463 ms | 0 in both runs |
+| Pipeline | 16 clients, depth 100, 2 runs | 238,992 commands/s | 5.477 ms | 12.340 ms | 17.878 ms | 0 in both runs |
+| SET, persistence OFF | 16 clients, 2 runs | 86,624 ops/s | 0.152 ms | 0.253 ms | 0.551 ms | 0 in both runs |
+| SET, AOF ON | 16 clients, 2 runs | 26,098 ops/s | 0.563 ms | 0.846 ms | 1.870 ms | 0 in both runs |
+
+**Pipeline latency is per batch of 100 commands**, not per individual command. The two pipeline runs had maximum batch latencies of 330.159 ms and 312.224 ms. The observed SET throughput with AOF enabled was about 69.9% lower than the persistence-disabled baseline in this preliminary two-run comparison. Treat this as a local observation, not a universal AOF penalty. The AOF writer calls `FlushAsync()` per append; that alone does not establish physical-media `fsync` durability.
+
+GET-only 16-client runs varied: one run measured 104,470 ops/s, while two later runs measured 86,461 and 86,562 ops/s. Do not claim a definitive optimal client count from these runs.
+
+### RDB snapshot and restore
+
+Five trials were run at each dataset size. Snapshot time includes graceful shutdown overhead; restore time includes startup and listener readiness. File size was identical across the five trials for each size.
+
+| String keys | Median seed time | Median shutdown + snapshot | RDB file size | Median restore to ready |
+|---:|---:|---:|---:|---:|
+| 1,000 | 27.91 ms | 2.02 ms | 78,988 B | 1.53 ms |
+| 10,000 | 261.47 ms | 5.68 ms | 799,735 B | 20.00 ms |
+| 50,000 | 1,943.60 ms | 30.63 ms | 4,043,095 B | 72.19 ms |
+
+These are medians of five trials on one machine. The individual runs show meaningful timing variability; retain raw trials when citing these figures. The managed-heap delta is excluded from headline results because it is noisy and does not estimate total dataset memory. The RDB runner verifies sampled keys and the first list rather than every restored key.
+
+---
+
+# Historical BenchmarkDotNet Results
+
+The following BenchmarkDotNet and concurrent-load tables are preserved from an earlier README snapshot. Their raw output, exact source revision, and full measurement metadata were not provided with the current run record. Treat them as historical and **not directly comparable** with the recent local measurements above.
 
 ## Command Throughput
 
@@ -153,7 +214,7 @@ INCR  : 10%
 
 ---
 
-# Concurrent Load Results
+# Historical Concurrent Load Results
 
 | Clients | Duration | Operations | Throughput | Errors | p50 | p95 | p99 |
 |---:|---:|---:|---:|---:|---:|---:|---:|

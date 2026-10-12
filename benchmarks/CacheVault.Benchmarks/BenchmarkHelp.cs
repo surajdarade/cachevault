@@ -28,9 +28,12 @@ Load options:
   --sample-rate <N>          Record 1 latency sample per N operations. Default: 100
   --aof                       Enable AOF for the load test
   --rdb                       Enable RDB for the load test
+  --bypass-command-gate       Diagnostic GET-only run; bypass dispatch gate
 
 Examples:
   dotnet run -c Release --project benchmarks/CacheVault.Benchmarks -- --load --clients 64 --duration 60 --workload mixed
+
+  dotnet run -c Release --project benchmarks/CacheVault.Benchmarks -- --load --clients 16 --duration 30 --workload get --bypass-command-gate
 
   dotnet run -c Release --project benchmarks/CacheVault.Benchmarks -- --load --clients 64 --duration 60 --workload pipeline --pipeline 100
 

@@ -28,6 +28,7 @@ public sealed class RedisTcpServer :
 
     private CancellationTokenSource? _serverCancellationTokenSource;
     private Task? _replicaSynchronizationTask;
+    private Task? _rdbSaveTask;
     private bool _serverStarted;
 
     public RedisTcpServer(
@@ -172,7 +173,7 @@ public sealed class RedisTcpServer :
 
                 if (_serverStarted)
                 {
-                    await _rdbPersistenceService.SaveAsync(
+                    await SaveRdbOnceAsync(
                         CancellationToken.None);
                 }
             }
@@ -240,7 +241,25 @@ public sealed class RedisTcpServer :
                             cancellationToken)));
         }
 
-        await _rdbPersistenceService.SaveAsync(
+        await SaveRdbOnceAsync(
+            cancellationToken);
+    }
+
+    private Task SaveRdbOnceAsync(
+        CancellationToken cancellationToken)
+    {
+        Task saveTask;
+
+        lock (_lifecycleLock)
+        {
+            _rdbSaveTask ??=
+                _rdbPersistenceService.SaveAsync(
+                    CancellationToken.None);
+
+            saveTask = _rdbSaveTask;
+        }
+
+        return saveTask.WaitAsync(
             cancellationToken);
     }
 

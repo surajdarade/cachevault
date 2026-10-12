@@ -29,6 +29,8 @@ public class LoadOptions
 
     public bool EnableRdb { get; private set; }
 
+    public bool BypassCommandExecutionGate { get; private set; }
+
     public static LoadOptions Parse(string[] args)
     {
         var options = new LoadOptions();
@@ -73,6 +75,10 @@ public class LoadOptions
                     options.EnableRdb = true;
                     break;
 
+                case "--bypass-command-gate":
+                    options.BypassCommandExecutionGate = true;
+                    break;
+
                 case "--help":
                     BenchmarkHelp.Print();
                     return options;
@@ -81,6 +87,18 @@ public class LoadOptions
                     throw new ArgumentException(
                         $"Unknown load option '{argument}'.");
             }
+        }
+
+        if (options.BypassCommandExecutionGate &&
+            options.Workload != LoadWorkload.Get) {
+            throw new ArgumentException(
+                "--bypass-command-gate is restricted to the GET workload because it disables the production dispatch synchronization boundary.");
+        }
+
+        if (options.BypassCommandExecutionGate &&
+            (options.EnableAof || options.EnableRdb)) {
+            throw new ArgumentException(
+                "--bypass-command-gate requires AOF and RDB to remain disabled for this diagnostic experiment.");
         }
 
         return options;

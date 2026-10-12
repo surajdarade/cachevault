@@ -49,6 +49,9 @@ public sealed class AofRestartIntegrationTests {
             Assert.True(
                 aofLengthAfterNewMutation >
                 aofLengthAfterRecovery);
+
+            await VerifyListMutationAfterSecondRestartAsync(
+                aofFilePath);
         }
         finally {
             if (Directory.Exists(
@@ -141,6 +144,21 @@ public sealed class AofRestartIntegrationTests {
             Assert.Equal(
                 11,
                 incrementResult.Value);
+
+            RespValue listResponse =
+                await client.SendCommandAsync(
+                    "RPUSH",
+                    "events",
+                    "first",
+                    "second");
+
+            var listResult =
+                Assert.IsType<RespInteger>(
+                    listResponse);
+
+            Assert.Equal(
+                2,
+                listResult.Value);
         }
         finally {
             await server.StopAsync(
@@ -240,6 +258,32 @@ public sealed class AofRestartIntegrationTests {
                 12,
                 incrementResult.Value);
 
+            RespValue listResponse =
+                await client.SendCommandAsync(
+                    "LRANGE",
+                    "events",
+                    "0",
+                    "-1");
+
+            AssertRespArray(
+                listResponse,
+                new RespBulkString("first"),
+                new RespBulkString("second"));
+
+            RespValue appendResponse =
+                await client.SendCommandAsync(
+                    "RPUSH",
+                    "events",
+                    "third");
+
+            var appendResult =
+                Assert.IsType<RespInteger>(
+                    appendResponse);
+
+            Assert.Equal(
+                3,
+                appendResult.Value);
+
             return aofLengthAfterRecovery;
         }
         finally {
@@ -253,6 +297,102 @@ public sealed class AofRestartIntegrationTests {
             }
             catch (OperationCanceledException) {
             }
+        }
+    }
+
+    private static async Task VerifyListMutationAfterSecondRestartAsync(
+        string aofFilePath) {
+        var services =
+            new ServiceCollection();
+
+        var options =
+            new ServerOptions
+            {
+                Host = "127.0.0.1",
+                Port = 0,
+                EnableRdb = false,
+                EnableAof = true,
+                AofFilePath = aofFilePath
+            };
+
+        services.AddCacheVaultServer(
+            options);
+
+        await using ServiceProvider serviceProvider =
+            services.BuildServiceProvider();
+
+        IRedisTcpServer server =
+            serviceProvider.GetRequiredService<
+                IRedisTcpServer>();
+
+        using var cancellationTokenSource =
+            new CancellationTokenSource();
+
+        Task serverTask =
+            server.StartAsync(
+                cancellationTokenSource.Token);
+
+        await WaitForServerToStartAsync(
+            server,
+            serverTask);
+
+        try {
+            await using var client =
+                await RedisTestClient.ConnectAsync(
+                    server.LocalEndpoint!);
+
+            RespValue listResponse =
+                await client.SendCommandAsync(
+                    "LRANGE",
+                    "events",
+                    "0",
+                    "-1");
+
+            AssertRespArray(
+                listResponse,
+                new RespBulkString("first"),
+                new RespBulkString("second"),
+                new RespBulkString("third"));
+
+            RespValue counterResponse =
+                await client.SendCommandAsync(
+                    "GET",
+                    "counter");
+
+            Assert.Equal(
+                new RespBulkString("12"),
+                counterResponse);
+        }
+        finally {
+            await server.StopAsync(
+                CancellationToken.None);
+
+            cancellationTokenSource.Cancel();
+
+            try {
+                await serverTask;
+            }
+            catch (OperationCanceledException) {
+            }
+        }
+    }
+
+    private static void AssertRespArray(
+        RespValue actual,
+        params RespValue[] expected) {
+        RespArray actualArray =
+            Assert.IsType<RespArray>(actual);
+
+        Assert.NotNull(actualArray.Values);
+
+        Assert.Equal(
+            expected.Length,
+            actualArray.Values.Count);
+
+        for (int index = 0; index < expected.Length; index++) {
+            Assert.Equal(
+                expected[index],
+                actualArray.Values[index]);
         }
     }
 

@@ -20,6 +20,17 @@ public static class Program
 
         if (args.Length > 0 &&
             args[0].Equals(
+                "--rdb-benchmark",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            await RdbBenchmarkRunner.RunAsync(
+                args.Skip(1).ToArray());
+
+            return;
+        }
+
+        if (args.Length > 0 &&
+            args[0].Equals(
                 "--help",
                 StringComparison.OrdinalIgnoreCase))
         {

@@ -1,5 +1,7 @@
 using System.Net;
 using CacheVault.Server.Configuration;
+using CacheVault.Server.Commands.Abstractions;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using CacheVault.Server.Networking.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -38,7 +40,8 @@ public class CacheVaultBenchmarkServer : IAsyncDisposable {
 
     public static async Task<CacheVaultBenchmarkServer> StartAsync(
         bool enableRdb = false,
-        bool enableAof = false) {
+        bool enableAof = false,
+        bool bypassCommandExecutionGate = false) {
         string directory =
             Path.Combine(
                 Path.GetTempPath(),
@@ -65,6 +68,14 @@ public class CacheVaultBenchmarkServer : IAsyncDisposable {
         var services = new ServiceCollection();
 
         services.AddCacheVaultServer(options);
+
+        // Diagnostic only: bypass dispatch serialization for GET-only benchmarks.
+        // The load-options parser rejects this mode for all other workloads.
+        if (bypassCommandExecutionGate) {
+            services.RemoveAll<ICommandExecutionGate>();
+            services.AddSingleton<ICommandExecutionGate>(
+                new NoOpCommandExecutionGate());
+        }
 
         ServiceProvider serviceProvider =
             services.BuildServiceProvider();
@@ -145,6 +156,15 @@ public class CacheVaultBenchmarkServer : IAsyncDisposable {
             catch {
                 // Benchmark cleanup must not hide the benchmark result.
             }
+        }
+    }
+    private sealed class NoOpCommandExecutionGate : ICommandExecutionGate {
+        public ValueTask WaitAsync(CancellationToken cancellationToken) {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.CompletedTask;
+        }
+
+        public void Release() {
         }
     }
 }
