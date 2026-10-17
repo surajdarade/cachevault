@@ -1,0 +1,32 @@
+
+CacheVault load benchmark
+--------------------------
+Duration      : 60s
+Clients       : 16
+Workload      : Get
+Pipeline      : 100
+Sample rate   : 1/100
+AOF           : OFF
+RDB           : OFF
+Command gate  : BYPASSED (diagnostic)
+Runtime       : .NET 10.0.12
+OS            : Microsoft Windows 10.0.26200
+CPU count     : 18
+
+Server        : 127.0.0.1:57156
+
+Results
+-------
+Elapsed        : 60.005s
+Operations     : 3,118,976
+Throughput     : 51,978 ops/sec
+Errors         : 0
+  RESP server  : 0
+  Protocol     : 0
+  Transport    : 0
+  Other        : 0
+Latency samples: 31,197
+p50            : 0.240 ms
+p95            : 0.443 ms
+p99            : 2.094 ms
+max            : 22.350 ms
