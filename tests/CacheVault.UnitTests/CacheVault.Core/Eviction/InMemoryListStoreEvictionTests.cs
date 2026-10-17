@@ -1,5 +1,7 @@
 using System.Text;
+using System.Threading.Tasks;
 using CacheVault.Core.Eviction;
+using CacheVault.Core.Eviction.Abstractions;
 using CacheVault.Core.Lists;
 using CacheVault.Core.Models;
 
@@ -110,6 +112,52 @@ public sealed class InMemoryListStoreEvictionTests
 
         Assert.True(store.Contains("numbers"));
         Assert.Equal(72, manager.MemoryUsageBytes);
+    }
+
+    [Fact]
+    public void PushOperations_InvokeEvictionAfterReleasingTheListKeyLock()
+    {
+        var coordinator = new LockCheckingEvictionCoordinator();
+
+        var store =
+            new InMemoryListStore(
+                evictionCoordinator: coordinator);
+
+        coordinator.OnEnforce = () =>
+        {
+            Task<bool> accessTask =
+                Task.Run(() => store.Contains("numbers"));
+
+            Assert.True(
+                accessTask.Wait(TimeSpan.FromSeconds(2)),
+                "Eviction enforcement ran while the list key lock was held.");
+
+            Assert.True(accessTask.Result);
+        };
+
+        store.PushRight("numbers", ["one"]);
+        store.PushLeft("numbers", ["two"]);
+    }
+
+    private sealed class LockCheckingEvictionCoordinator
+        : IEvictionCoordinator
+    {
+        public Action? OnEnforce { get; set; }
+
+        public void RegisterStringKeyspace(
+            Func<string, bool> remove)
+        {
+        }
+
+        public void RegisterListKeyspace(
+            Func<string, bool> remove)
+        {
+        }
+
+        public void EnforceMemoryLimit()
+        {
+            OnEnforce?.Invoke();
+        }
     }
 
     private static long CalculateExpectedMemoryUsage(

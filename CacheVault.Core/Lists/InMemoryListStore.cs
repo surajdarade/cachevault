@@ -67,6 +67,8 @@ public sealed class InMemoryListStore :
     {
         ValidateValues(key, values);
 
+        int count;
+
         lock (GetLock(key))
         {
             long addedValueMemoryUsageBytes =
@@ -96,17 +98,22 @@ public sealed class InMemoryListStore :
                 key,
                 updatedValueMemoryUsageBytes);
 
-            _evictionCoordinator?.EnforceMemoryLimit();
-
-            return list.Count;
+            count = list.Count;
         }
+
+        // Run eviction only after releasing the per-key lock.
+        _evictionCoordinator?.EnforceMemoryLimit();
+
+        return count;
     }
 
     public int PushRight(
-        string key,
-        IReadOnlyList<string> values)
+    string key,
+    IReadOnlyList<string> values)
     {
         ValidateValues(key, values);
+
+        int count;
 
         lock (GetLock(key))
         {
@@ -134,10 +141,13 @@ public sealed class InMemoryListStore :
                 key,
                 updatedValueMemoryUsageBytes);
 
-            _evictionCoordinator?.EnforceMemoryLimit();
-
-            return list.Count;
+            count = list.Count;
         }
+
+        // Run eviction after releasing the per-key lock.
+        _evictionCoordinator?.EnforceMemoryLimit();
+
+        return count;
     }
 
     public string? PopLeft(string key)
