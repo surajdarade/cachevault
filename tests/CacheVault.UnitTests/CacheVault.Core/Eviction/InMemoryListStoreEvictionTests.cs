@@ -139,6 +139,51 @@ public sealed class InMemoryListStoreEvictionTests
         store.PushLeft("numbers", ["two"]);
     }
 
+    [Fact]
+    public async Task ConcurrentPushesAcrossKeys_WithEvictionCompleteWithinTimeout()
+    {
+        const int workerCount = 8;
+        const int operationsPerWorker = 300;
+        const int keyCount = 16;
+
+        var manager =
+            new EvictionManager(
+                512,
+                EvictionPolicy.Lru);
+
+        var coordinator =
+            new EvictionCoordinator(manager);
+
+        var store =
+            new InMemoryListStore(
+                manager,
+                coordinator);
+
+        Task[] workers =
+            Enumerable.Range(0, workerCount)
+                .Select(worker => Task.Run(() =>
+                {
+                    for (int operation = 0;
+                         operation < operationsPerWorker;
+                         operation++)
+                    {
+                        string key =
+                            $"list-{(worker + operation) % keyCount}";
+
+                        store.PushRight(key, ["x"]);
+                    }
+                }))
+                .ToArray();
+
+        await Task.WhenAll(workers)
+            .WaitAsync(TimeSpan.FromSeconds(20));
+
+        Assert.True(
+            manager.MemoryUsageBytes <= manager.MaxMemoryBytes,
+            $"Memory usage {manager.MemoryUsageBytes} exceeded limit " +
+            $"{manager.MaxMemoryBytes} after concurrent operations.");
+    }
+
     private sealed class LockCheckingEvictionCoordinator
         : IEvictionCoordinator
     {
