@@ -21,6 +21,11 @@ public sealed class InMemoryListStore :
     private readonly ConcurrentDictionary<string, long> _versions =
         new(StringComparer.Ordinal);
 
+    // Tracks UTF-8 bytes in list values so mutation metadata updates avoid
+    // traversing the entire list after each operation.
+    private readonly ConcurrentDictionary<string, long> _listValueMemoryUsageBytes =
+        new(StringComparer.Ordinal);
+
     private long _version;
 
     private readonly IEvictionManager? _evictionManager;
@@ -64,6 +69,9 @@ public sealed class InMemoryListStore :
 
         lock (GetLock(key))
         {
+            long addedValueMemoryUsageBytes =
+                CalculateValueMemoryUsage(values);
+
             List<string> list =
                 _lists.GetOrAdd(
                     key,
@@ -74,11 +82,19 @@ public sealed class InMemoryListStore :
                 list.Insert(0, value);
             }
 
+            long updatedValueMemoryUsageBytes =
+                checked(
+                    _listValueMemoryUsageBytes.GetOrAdd(key, 0) +
+                    addedValueMemoryUsageBytes);
+
+            _listValueMemoryUsageBytes[key] =
+                updatedValueMemoryUsageBytes;
+
             MarkKeyChanged(key);
 
             UpdateEvictionMetadata(
                 key,
-                list);
+                updatedValueMemoryUsageBytes);
 
             _evictionCoordinator?.EnforceMemoryLimit();
 
@@ -94,6 +110,9 @@ public sealed class InMemoryListStore :
 
         lock (GetLock(key))
         {
+            long addedValueMemoryUsageBytes =
+                CalculateValueMemoryUsage(values);
+
             List<string> list =
                 _lists.GetOrAdd(
                     key,
@@ -101,11 +120,19 @@ public sealed class InMemoryListStore :
 
             list.AddRange(values);
 
+            long updatedValueMemoryUsageBytes =
+                checked(
+                    _listValueMemoryUsageBytes.GetOrAdd(key, 0) +
+                    addedValueMemoryUsageBytes);
+
+            _listValueMemoryUsageBytes[key] =
+                updatedValueMemoryUsageBytes;
+
             MarkKeyChanged(key);
 
             UpdateEvictionMetadata(
                 key,
-                list);
+                updatedValueMemoryUsageBytes);
 
             _evictionCoordinator?.EnforceMemoryLimit();
 
@@ -128,6 +155,9 @@ public sealed class InMemoryListStore :
             }
 
             string value = list[0];
+            long removedValueMemoryUsageBytes =
+                Encoding.UTF8.GetByteCount(value);
+
             list.RemoveAt(0);
 
             if (list.Count == 0)
@@ -139,11 +169,19 @@ public sealed class InMemoryListStore :
                 return value;
             }
 
+            long updatedValueMemoryUsageBytes =
+                checked(
+                    _listValueMemoryUsageBytes[key] -
+                    removedValueMemoryUsageBytes);
+
+            _listValueMemoryUsageBytes[key] =
+                updatedValueMemoryUsageBytes;
+
             MarkKeyChanged(key);
 
             UpdateEvictionMetadata(
                 key,
-                list);
+                updatedValueMemoryUsageBytes);
 
             return value;
         }
@@ -165,6 +203,8 @@ public sealed class InMemoryListStore :
 
             int lastIndex = list.Count - 1;
             string value = list[lastIndex];
+            long removedValueMemoryUsageBytes =
+                Encoding.UTF8.GetByteCount(value);
 
             list.RemoveAt(lastIndex);
 
@@ -177,11 +217,19 @@ public sealed class InMemoryListStore :
                 return value;
             }
 
+            long updatedValueMemoryUsageBytes =
+                checked(
+                    _listValueMemoryUsageBytes[key] -
+                    removedValueMemoryUsageBytes);
+
+            _listValueMemoryUsageBytes[key] =
+                updatedValueMemoryUsageBytes;
+
             MarkKeyChanged(key);
 
             UpdateEvictionMetadata(
                 key,
-                list);
+                updatedValueMemoryUsageBytes);
 
             return value;
         }
@@ -337,6 +385,10 @@ public sealed class InMemoryListStore :
 
         if (removed)
         {
+            _listValueMemoryUsageBytes.TryRemove(
+                key,
+                out _);
+
             if (notifyEviction)
             {
                 _evictionManager?.OnRemove(key);
@@ -350,28 +402,28 @@ public sealed class InMemoryListStore :
 
     private void UpdateEvictionMetadata(
         string key,
-        List<string> list)
+        long valueMemoryUsageBytes)
     {
         if (_evictionManager is null)
         {
             return;
         }
 
+        long memoryUsageBytes = checked(
+            EntryOverheadBytes +
+            Encoding.UTF8.GetByteCount(key) +
+            valueMemoryUsageBytes);
+
         _evictionManager.OnSet(
             key,
-            CalculateMemoryUsage(
-                key,
-                list),
+            memoryUsageBytes,
             isList: true);
     }
 
-    private static long CalculateMemoryUsage(
-        string key,
+    private static long CalculateValueMemoryUsage(
         IReadOnlyList<string> values)
     {
-        long size =
-            EntryOverheadBytes +
-            Encoding.UTF8.GetByteCount(key);
+        long size = 0;
 
         foreach (string value in values)
         {
