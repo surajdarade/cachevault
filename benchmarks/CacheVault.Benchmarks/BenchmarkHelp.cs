@@ -17,6 +17,15 @@ BenchmarkDotNet:
   dotnet run -c Release --project benchmarks/CacheVault.Benchmarks -- --filter *Transaction*
   dotnet run -c Release --project benchmarks/CacheVault.Benchmarks -- --filter *Mixed*
 
+List scaling latency benchmark (one TCP client; AOF/RDB off):
+  dotnet run -c Release --project benchmarks/CacheVault.Benchmarks -- --list-scaling
+
+List scaling options:
+  --sizes <comma-separated-counts>  List sizes. Default: 1000,10000,100000
+  --repeats <count>                 Independent server trials per size. Default: 5
+  --samples <count>                 Measured samples per operation per trial. Default: 100
+  --warmup <count>                  Warm-up operations per operation per trial. Default: 20
+
 Real TCP load tests:
   dotnet run -c Release --project benchmarks/CacheVault.Benchmarks -- --load
 

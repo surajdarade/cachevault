@@ -31,6 +31,17 @@ public static class Program
 
         if (args.Length > 0 &&
             args[0].Equals(
+                "--list-scaling",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            await ListScalingBenchmarkRunner.RunAsync(
+                args.Skip(1).ToArray());
+
+            return;
+        }
+
+        if (args.Length > 0 &&
+            args[0].Equals(
                 "--help",
                 StringComparison.OrdinalIgnoreCase))
         {
